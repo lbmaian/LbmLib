@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+
+  <TranslationFilesGeneratorModName>Translation Files Generator</TranslationFilesGeneratorModName>
+
+  <GenerateTranslationFilesForMod>Generate translation files for mod</GenerateTranslationFilesForMod>
+  <GeneratingTranslationFilesForMod>Generating translation files for mod</GeneratingTranslationFilesForMod>
+
+  <ConfirmGenerateTranslationFiles>Are you sure you want to generate all translation files for mod "{0}" and language {1}?\n\nFor the default language ({2}), this will:\n  - Add def-injected translation files for all translatable fields in the mod's definitions\nFor any other language, this will:\n  - Add placeholders for missing keyed translations and def-injected translations\n  - Add or update comments containing the original, untranslated text\nFor any language, this will also:\n  - Move all keyed and def-injected translations to the appropriate XML files\n  - Apply automatic formatting to all XML files\n  - Update back-compatible def names\n  - Remove all existing XML comments (except in full-list injections)\n\nNon-XML files will not be removed or modified.\n\nRemember to restart the game after modifying the language files before running this tool in order to reload all data.\n\nMake sure to back up all translation files in the mod before using this tool.</ConfirmGenerateTranslationFiles>
+  <ConfirmGenerateTranslationFiles_Confirm>Yes, I have a backup</ConfirmGenerateTranslationFiles_Confirm>
+
+</LanguageData>
