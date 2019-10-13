@@ -99,21 +99,21 @@ namespace TranslationFilesGenerator
 			instructions.RemoveRange(0, firstReturnIndex + 1);
 
 			// Insert a new Rect variable for a new button and a copy of the way they're initialized (and the label Rect is modified) before the other button Rect's are initialized.
-			var rectLocalVar = ilGenerator.DeclareLocal(typeof(Rect));
+			var rectVar = ilGenerator.DeclareLocal(typeof(Rect));
 			var firstRectInitLoadIndex = instructions.FindIndex(OpCodes.Ldloca_S.AsInstructionPredicate<LocalBuilder>(localVar =>
 				localVar.LocalIndex != 0 &&
 				localVar.LocalType == typeof(Rect)));
 			var firstRectSetHeightCallIndex = instructions.FindIndex(firstRectInitLoadIndex + 1,
 				OpCodes.Call.AsInstructionPredicate(typeof(Rect).GetProperty(nameof(Rect.height)).GetSetMethod()));
 			var newRectInstructions = instructions.CloneRange(firstRectInitLoadIndex, firstRectSetHeightCallIndex - firstRectInitLoadIndex + 1);
-			newRectInstructions[0].operand = rectLocalVar;
+			newRectInstructions[0].operand = rectVar;
 			instructions.InsertRange(firstRectInitLoadIndex, newRectInstructions);
 
 			// Insert a new ButtonText for the new Rect after all the other ButtonText's (before the GUI.EndGroup call).
 			var guiEndGroupCallIndex = instructions.FindLastIndex(OpCodes.Call.AsInstructionPredicate(typeof(GUI).GetMethod(nameof(GUI.EndGroup))));
 			instructions.InsertRange(guiEndGroupCallIndex, new[]
 			{
-				new CodeInstruction(OpCodes.Ldloc_S, rectLocalVar) { labels = instructions[guiEndGroupCallIndex].labels.PopAll() },
+				new CodeInstruction(OpCodes.Ldloc_S, rectVar) { labels = instructions[guiEndGroupCallIndex].labels.PopAll() },
 				new CodeInstruction(OpCodes.Call,
 					typeof(MainMenuDrawer_DoTranslationInfoRect_Patch).GetMethod(nameof(MainMenuDrawer_DoTranslationInfoRect_Patch.AddGenerateTranslationFilesButton), AccessTools.all)),
 			});
@@ -388,17 +388,19 @@ namespace TranslationFilesGenerator
 			// So not going down that rabbit hole yet.
 			// TODO: Go down that rabbit hole.
 			// In the CleanupKeyedTranslations method, activeLanguage is a variable, but defaultLanguage is a field on an internal class (probably due to the usage of LINQ),
-			// so rather than deal with that weirdness, just add a no-dependency check at the beginning of the method.
+			// so rather than deal with that weirdness, just add a no-dependency check at the beginning of the method
+			// where if the languages are same, do nothing and return early. In other words, if the languages are different, skip the early return.
 			var firstInstructionLabel = ilGenerator.DefineLabel();
 			instructions[0].labels.Add(firstInstructionLabel);
 			var languageCheckInstructions = TranspilerSnippets.LanguageCheckInstructions(sameLanguage: false, firstInstructionLabel);
+			languageCheckInstructions.Add(new CodeInstruction(OpCodes.Ret));
 			instructions.InsertRange(0, languageCheckInstructions);
-			// Do nothing and return early when activeLanguage == defaultLanguage.
-			instructions.Insert(languageCheckInstructions.Count, new CodeInstruction(OpCodes.Ret));
 
 			// If the keyed translations folder doesn't exist, rather than erroring out like it originally does, create the folder instead,
 			// regardless of whether in Clean or GenerateForMod mode.
 			TranspilerSnippets.ReplaceFolderNotExistsErrorWithFolderCreate(instructions);
+
+			// TODO: Don't add english XComment if non-placeholder translation already exists.
 
 			return instructions;
 		}
@@ -574,23 +576,23 @@ namespace TranslationFilesGenerator
 
 			// Need a DefInjectionPackage var for ModifyInjection.
 			// Initialize it to GetDefInjectionPackage(activeLanguage, defType).
-			var defInjectionPackageLocalVar = ilGenerator.DeclareLocal(typeof(DefInjectionPackage));
+			var defInjectionPackageVar = ilGenerator.DeclareLocal(typeof(DefInjectionPackage));
 			var activeLanguageStoreIndex = instructions.FindIndex(OpCodes.Stloc_S.AsInstructionPredicate(typeof(LoadedLanguage).AsLocalVarTypePredicate()));
 			var defInjectionVarInitInstructions = new[]
 			{
 				instructions[activeLanguageStoreIndex].Clone(OpCodes.Ldloc_S),
 				new CodeInstruction(OpCodes.Ldarg_0), // defType
 				new CodeInstruction(OpCodes.Call, typeof(TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch).GetMethod(nameof(GetDefInjectionPackage), AccessTools.all)),
-				new CodeInstruction(OpCodes.Stloc_S, defInjectionPackageLocalVar),
+				new CodeInstruction(OpCodes.Stloc_S, defInjectionPackageVar),
 			};
 			instructions.InsertRange(activeLanguageStoreIndex + 1, defInjectionVarInitInstructions);
 
 			// Also need a FileInfo translationFile var for ModifyInjection.
-			var translationFileLocalVar = ilGenerator.DeclareLocal(typeof(FileInfo));
+			var translationFileVar = ilGenerator.DeclareLocal(typeof(FileInfo));
 			// Annoyingly, fileName is a field stored in an object of an internal type, rather than a local var.
-			var xDocumentLocalVarStoreIndex = instructions.FindIndex(defInjectionVarInitInstructions.Length + 1, OpCodes.Stloc_S.AsInstructionPredicate(typeof(XDocument).AsLocalVarTypePredicate()));
-			//Log.Message(instructions.ItemToDebugString(xDocumentLocalVarStoreIndex, "xDocumentLocalVarStoreIndex="));
-			var fileNameFieldStoreIndex = instructions.FindLastIndex(xDocumentLocalVarStoreIndex - 1,
+			var xDocumentVarStoreIndex = instructions.FindIndex(defInjectionVarInitInstructions.Length + 1, OpCodes.Stloc_S.AsInstructionPredicate(typeof(XDocument).AsLocalVarTypePredicate()));
+			//Log.Message(instructions.ItemToDebugString(xDocumentVarStoreIndex, "xDocumentVarStoreIndex="));
+			var fileNameFieldStoreIndex = instructions.FindLastIndex(xDocumentVarStoreIndex - 1,
 				OpCodes.Stfld.AsInstructionPredicate(typeof(string).AsFieldTypePredicate(fieldName: "fileName")));
 			//Log.Message(instructions.ItemToDebugString(fileNameFieldStoreIndex, "fileNameFieldStoreIndex="));
 			var fileNameHolderLoadIndex = instructions.FindLastIndex(fileNameFieldStoreIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate<LocalBuilder>(localVar =>
@@ -609,29 +611,47 @@ namespace TranslationFilesGenerator
 				instructions[fileNameFieldStoreIndex].Clone(OpCodes.Ldfld),
 				new CodeInstruction(OpCodes.Call, typeof(Path).GetMethod(nameof(Path.Combine))),
 				new CodeInstruction(OpCodes.Newobj, typeof(FileInfo).GetConstructor(new[] { typeof(string) })),
-				new CodeInstruction(OpCodes.Stloc_S, translationFileLocalVar),
+				new CodeInstruction(OpCodes.Stloc_S, translationFileVar),
 			};
-			instructions.InsertRange(xDocumentLocalVarStoreIndex + 1, translationFileVarInitInstructions);
+			instructions.InsertRange(xDocumentVarStoreIndex + 1, translationFileVarInitInstructions);
 			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(varinit):\n{instructions.ToDebugString()}");
 
 			// Skip first XComment since it's just the dummy <!--NEWLINE-->.
-			var searchStartIndex = xDocumentLocalVarStoreIndex + 1 + translationFileVarInitInstructions.Length + 1;
+			var searchStartIndex = xDocumentVarStoreIndex + 1 + translationFileVarInitInstructions.Length + 1;
 			searchStartIndex = instructions.FindIndex(searchStartIndex, OpCodes.Newobj.AsInstructionPredicate(typeof(XComment).GetConstructor(new[] { typeof(string) }))) + 1;
 			//Log.Message(instructions.ItemToDebugString(searchStartIndex, "searchStartIndex.1="));
 
 			// Case where the injection site is a list, and either does NOT allow a full list injection
 			// (i.e. does NOT have a field attributed with TranslationCanChangeCount) or has at least one existing injection in the list.
-			// TODO: Skip this case if activeLanguage == defaultLanguage, i.e. force full list injection.
-			searchStartIndex = ModifyInjection(instructions, ilGenerator, defInjectionPackageLocalVar, translationFileLocalVar, searchStartIndex, useNormalizedPathVar: true, fullListInsertion: false);
+			// If activeLanguage == defaultLanguage, we're going to throw away existing injections, so unless the injection site doesn't allow a full list injection,
+			// this case will be skipped then. Specifically, if the languages are the same, skip the loop where the hasExistingInjection flag can be set.
+			var getEnglishListCallIndex = instructions.FindIndex(searchStartIndex,
+				OpCodes.Call.AsInstructionPredicate(typeof(TranslationFilesCleaner).GetMethod("GetEnglishList", AccessTools.all)));
+			//Log.Message(instructions.ItemToDebugString(getEnglishListCallIndex, "getEnglishListCallIndex="));
+			var hasExistingInjectionVarStoreIndex = instructions.FindIndex(getEnglishListCallIndex + 1,
+				OpCodes.Stloc_S.AsInstructionPredicate(typeof(bool).AsLocalVarTypePredicate()));
+			//Log.Message(instructions.ItemToDebugString(hasExistingInjectionVarStoreIndex, "hasExistingInjectionVarStoreIndex="));
+			var hasExistingInjectionVarLoadIndex = instructions.FindIndex(hasExistingInjectionVarStoreIndex + 1,
+				OpCodes.Ldloc_S.AsInstructionPredicate(instructions[hasExistingInjectionVarStoreIndex].operand));
+			//Log.Message(instructions.ItemToDebugString(hasExistingInjectionVarLoadIndex, "hasExistingInjectionVarLoadIndex="));
+			var partialListInjectionLabel = ilGenerator.DefineLabel();
+			instructions[hasExistingInjectionVarLoadIndex].labels.Add(partialListInjectionLabel);
+			var languageCheckInstructions = TranspilerSnippets.LanguageCheckInstructions(sameLanguage: true, partialListInjectionLabel);
+			instructions.InsertRange(hasExistingInjectionVarStoreIndex + 1, languageCheckInstructions);
+
+			searchStartIndex = ModifyInjection(instructions, ilGenerator, defInjectionPackageVar, translationFileVar, searchStartIndex,
+				skipSameLanguageInjection: true, fullListInsertion: false);
 			//Log.Message(instructions.ItemToDebugString(searchStartIndex, "searchStartIndex.2="));
 
 			// Case where the injection site is a list, and both allows a full list injection (i.e. does have a field attributed with TranslationCanChangeCount,
 			// currently only used for RulePack/Rule_File fields) and does NOT have any existing injections in the list.
-			searchStartIndex = ModifyInjection(instructions, ilGenerator, defInjectionPackageLocalVar, translationFileLocalVar, searchStartIndex, useNormalizedPathVar: false, fullListInsertion: true);
+			searchStartIndex = ModifyInjection(instructions, ilGenerator, defInjectionPackageVar, translationFileVar, searchStartIndex,
+				skipSameLanguageInjection: false, fullListInsertion: true);
 			//Log.Message(instructions.ItemToDebugString(searchStartIndex, "searchStartIndex.3="));
 
 			// Case where the injection site is NOT a list.
-			searchStartIndex = ModifyInjection(instructions, ilGenerator, defInjectionPackageLocalVar, translationFileLocalVar, searchStartIndex, useNormalizedPathVar: false, fullListInsertion: false);
+			searchStartIndex = ModifyInjection(instructions, ilGenerator, defInjectionPackageVar, translationFileVar, searchStartIndex,
+				skipSameLanguageInjection: false, fullListInsertion: false);
 			//Log.Message(instructions.ItemToDebugString(searchStartIndex, "searchStartIndex.4="));
 
 			// Ensure Def types use GenTypes.GetTypeNameWithoutIgnoredNamespaces to get their folder name.
@@ -658,8 +678,8 @@ namespace TranslationFilesGenerator
 			return defInjectionPackage;
 		}
 
-		static int ModifyInjection(List<CodeInstruction> instructions, ILGenerator ilGenerator, LocalBuilder defInjectionPackageLocalVar, LocalBuilder translationFileLocalVar,
-			int searchStartIndex, bool useNormalizedPathVar, bool fullListInsertion)
+		static int ModifyInjection(List<CodeInstruction> instructions, ILGenerator ilGenerator, LocalBuilder defInjectionPackageVar, LocalBuilder translationFileVar,
+			int searchStartIndex, bool skipSameLanguageInjection, bool fullListInsertion)
 		{
 			var xCommentIndex = instructions.FindIndex(searchStartIndex, OpCodes.Newobj.AsInstructionPredicate(typeof(XComment).GetConstructor(new[] { typeof(string) })));
 			//Log.Message(instructions.ItemToDebugString(xCommentIndex, "xCommentIndex="));
@@ -668,136 +688,149 @@ namespace TranslationFilesGenerator
 			//Log.Message(instructions.ItemToDebugString(tryStartIndex, "tryStartIndex="));
 			var afterTryEndLabel = (Label)instructions[instructions.FindIndex(xCommentIndex + 1, OpCodes.Leave.AsInstructionPredicate())].operand;
 			//Log.Message(instructions.ItemToDebugString(instructions.FindIndex(xCommentIndex + 1, instruction => instruction.labels.Contains(afterTryEndLabel)), "afterTryEndIndex="));
+			var defInjectionVarStoreIndex = instructions.FindLastIndex(tryStartIndex - 1,
+				OpCodes.Stloc_S.AsInstructionPredicate(typeof(DefInjectionPackage.DefInjection).AsLocalVarTypePredicate()));
+			//Log.Message(instructions.ItemToDebugString(defInjectionVarStoreIndex, "defInjectionVarStoreIndex="));
 
 			// All the following new logic which is going to be injected right before the try block containing the english XComment.
-
-			// If activeLanguage == defaultLanguage, we're going to effectively skip the english XComment,
-			// and add a new def-injection from the possibleDefInjection-derived englishStr/englishList,
-			// so that the later GetDefInjectableFieldNode call will see and use that new injection.
+			var newInstructions = new List<CodeInstruction>();
 			var languageNotSameLabel = ilGenerator.DefineLabel();
-			var newSameLanguageInstructions = TranspilerSnippets.LanguageCheckInstructions(sameLanguage: false, languageNotSameLabel);
 
-			var normalizedPathLoadInstructions = NormalizedPathLoadInstructions(instructions, xCommentIndex - 1, useNormalizedPathVar);
+			if (!skipSameLanguageInjection)
+			{
+				// If activeLanguage == defaultLanguage, we're going to effectively skip the english XComment,
+				// and add a new def-injection from the possibleDefInjection-derived englishStr/englishList,
+				// so that the later GetDefInjectableFieldNode call will see and use that new injection.
+				// If activeLanguage != defaultLanguage, skip to that case (see below).
+				newInstructions.AddRange(TranspilerSnippets.LanguageCheckInstructions(sameLanguage: false, languageNotSameLabel));
 
-			// If an injection for the normalizedPath exists, remove it.
-			newSameLanguageInstructions.AddRange(new[]
-			{
-				new CodeInstruction(OpCodes.Ldloc_S, defInjectionPackageLocalVar),
-				new CodeInstruction(OpCodes.Ldfld, typeof(DefInjectionPackage).GetField(nameof(DefInjectionPackage.injections))),
-			});
-			newSameLanguageInstructions.AddRange(normalizedPathLoadInstructions);
-			newSameLanguageInstructions.AddRange(new[]
-			{
-				new CodeInstruction(OpCodes.Call, typeof(Dictionary<string, DefInjectionPackage.DefInjection>).GetMethod(nameof(Dictionary<int, int>.Remove))),
-				new CodeInstruction(OpCodes.Pop),
-			});
-
-			// Get defInjectionPackage, translationFile, and normalizedPath.
-			newSameLanguageInstructions.AddRange(new[]
-			{
-				new CodeInstruction(OpCodes.Ldloc_S, defInjectionPackageLocalVar),
-				new CodeInstruction(OpCodes.Ldloc_S, translationFileLocalVar),
-			});
-			newSameLanguageInstructions.AddRange(normalizedPathLoadInstructions);
-
-			if (fullListInsertion)
-			{
-				// Get fullListInjection list, then call defInjectionPackage.TryAddFullListInjection(translationFile, normalizedPath, englishList.AsList(), null).
-				var englishListLocalVarLoadIndex = instructions.FindLastIndex(xCommentIndex - 1,
-					OpCodes.Ldloc_S.AsInstructionPredicate(typeof(IEnumerable<string>).AsLocalVarTypePredicate(useIsAssignableFrom: true)));
-				//Log.Message(instructions.ItemToDebugString(englishListLocalVarLoadIndex, "englishListLocalVarLoadIndex="));
-				MethodInfo asListMethod = typeof(MiscExtensions).GetMethod(nameof(MiscExtensions.AsList), AccessTools.all).MakeGenericMethod(typeof(string));
-				newSameLanguageInstructions.AddRange(new[]
+				// If an injection for the normalizedPath exists, remove it.
+				var defInjectionPackageInjectionsInstructions = DefInjectionPackageInjectionsInstructions(defInjectionPackageVar);
+				var normalizedPathLoadInstructions = NormalizedPathLoadInstructions(instructions, xCommentIndex - 1);
+				newInstructions.AddRange(defInjectionPackageInjectionsInstructions);
+				newInstructions.AddRange(normalizedPathLoadInstructions);
+				newInstructions.AddRange(new[]
 				{
-					instructions[englishListLocalVarLoadIndex].Clone(),
-					new CodeInstruction(OpCodes.Call, asListMethod),
-					new CodeInstruction(OpCodes.Ldnull), // comments
-					new CodeInstruction(OpCodes.Call, typeof(DefInjectionPackage).GetMethod("TryAddFullListInjection", AccessTools.all)),
+					new CodeInstruction(OpCodes.Call, typeof(Dictionary<string, DefInjectionPackage.DefInjection>).GetMethod(nameof(Dictionary<int, int>.Remove))),
+					new CodeInstruction(OpCodes.Pop),
 				});
-			}
-			else
-			{
-				// Get injection, then call defInjectionPackage.TryAddInjection(translationFile, normalizedPath, englishStr).
-				var englishStrLocalVarLoadIndex = instructions.FindLastIndex(xCommentIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate(typeof(string).AsLocalVarTypePredicate()));
-				//Log.Message(instructions.ItemToDebugString(englishStrLocalVarLoadIndex, "englishStrLocalVarLoadIndex="));
-				newSameLanguageInstructions.AddRange(new[]
+				// Also remove any existing normalizedPath.<x> injections if full list injection.
+				if (fullListInsertion)
 				{
-					instructions[englishStrLocalVarLoadIndex].Clone(),
-					new CodeInstruction(OpCodes.Call, typeof(DefInjectionPackage).GetMethod("TryAddInjection", AccessTools.all)),
+					newInstructions.AddRange(defInjectionPackageInjectionsInstructions);
+					newInstructions.AddRange(normalizedPathLoadInstructions);
+					newInstructions.AddRange(new[]
+					{
+						new CodeInstruction(OpCodes.Call,
+							typeof(TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch).GetMethod(nameof(RemoveAllInjectionsWithIndexedPath), AccessTools.all)),
+						new CodeInstruction(OpCodes.Pop),
+					});
+				}
+
+				// Get defInjectionPackage, translationFile, and normalizedPath.
+				newInstructions.AddRange(new[]
+				{
+					new CodeInstruction(OpCodes.Ldloc_S, defInjectionPackageVar),
+					new CodeInstruction(OpCodes.Ldloc_S, translationFileVar),
 				});
+				newInstructions.AddRange(normalizedPathLoadInstructions);
+
+				if (fullListInsertion)
+				{
+					// Get fullListInjection list, then call defInjectionPackage.TryAddFullListInjection(translationFile, normalizedPath, englishList.AsList(), null).
+					var englishListVarLoadIndex = instructions.FindLastIndex(xCommentIndex - 1,
+						OpCodes.Ldloc_S.AsInstructionPredicate(typeof(IEnumerable<string>).AsLocalVarTypePredicate(useIsAssignableFrom: true)));
+					//Log.Message(instructions.ItemToDebugString(englishListVarLoadIndex, "englishListVarLoadIndex="));
+					newInstructions.AddRange(new[]
+					{
+						instructions[englishListVarLoadIndex].Clone(),
+						new CodeInstruction(OpCodes.Call, typeof(MiscExtensions).GetMethod(nameof(MiscExtensions.AsList), AccessTools.all).MakeGenericMethod(typeof(string))),
+						new CodeInstruction(OpCodes.Ldnull), // comments
+						new CodeInstruction(OpCodes.Call, typeof(DefInjectionPackage).GetMethod("TryAddFullListInjection", AccessTools.all)),
+					});
+				}
+				else
+				{
+					// Get injection, then call defInjectionPackage.TryAddInjection(translationFile, normalizedPath, englishStr).
+					var englishStrVarLoadIndex = instructions.FindLastIndex(xCommentIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate(typeof(string).AsLocalVarTypePredicate()));
+					//Log.Message(instructions.ItemToDebugString(englishStrVarLoadIndex, "englishStrVarLoadIndex="));
+					newInstructions.AddRange(new[]
+					{
+						instructions[englishStrVarLoadIndex].Clone(),
+						new CodeInstruction(OpCodes.Call, typeof(DefInjectionPackage).GetMethod("TryAddInjection", AccessTools.all)),
+					});
+				}
+
+				// Get the newly added DefInjection.
+				newInstructions.AddRange(new[]
+				{
+					new CodeInstruction(OpCodes.Ldloc_S, defInjectionPackageVar),
+					new CodeInstruction(OpCodes.Ldfld, typeof(DefInjectionPackage).GetField(nameof(DefInjectionPackage.injections))),
+				});
+				newInstructions.AddRange(normalizedPathLoadInstructions);
+				newInstructions.AddRange(new[]
+				{
+					new CodeInstruction(OpCodes.Call, typeof(Dictionary<string, DefInjectionPackage.DefInjection>).GetProperty("Item").GetGetMethod()),
+				});
+
+				// Then assign it to the defInjection var.
+				newInstructions.Add(instructions[defInjectionVarStoreIndex].Clone());
+
+				// Finally branch to after the try-catch block.
+				newInstructions.Add(new CodeInstruction(OpCodes.Br, afterTryEndLabel));
 			}
-
-			// Get the newly added DefInjection.
-			newSameLanguageInstructions.AddRange(new[]
-			{
-				new CodeInstruction(OpCodes.Ldloc_S, defInjectionPackageLocalVar),
-				new CodeInstruction(OpCodes.Ldfld, typeof(DefInjectionPackage).GetField(nameof(DefInjectionPackage.injections))),
-			});
-			newSameLanguageInstructions.AddRange(normalizedPathLoadInstructions);
-			newSameLanguageInstructions.AddRange(new[]
-			{
-				new CodeInstruction(OpCodes.Call, typeof(Dictionary<string, DefInjectionPackage.DefInjection>).GetProperty("Item").GetGetMethod()),
-			});
-
-			// Then assign it to the defInjection var.
-			var defInjectionLocalVarStoreIndex = instructions.FindLastIndex(tryStartIndex - 1,
-				OpCodes.Stloc_S.AsInstructionPredicate(typeof(DefInjectionPackage.DefInjection).AsLocalVarTypePredicate()));
-			//Log.Message(instructions.ItemToDebugString(defInjectionLocalVarStoreIndex, "defInjectionLocalVarStoreIndex="));
-			newSameLanguageInstructions.Add(instructions[defInjectionLocalVarStoreIndex].Clone());
-
-			// Finally branch to after the try-catch block.
-			newSameLanguageInstructions.Add(new CodeInstruction(OpCodes.Br, afterTryEndLabel));
 
 			// In the activeLanguage != defaultLanguage case, don't add the english XComment if a non-placeholder injection already exists.
 			var tryStartLabel = ilGenerator.DefineLabel();
 			instructions[tryStartIndex].labels.Add(tryStartLabel);
-			var defInjectionLocalVar = instructions[defInjectionLocalVarStoreIndex].operand;
-			var newDifferentLanguageInstructions = new[]
+			var defInjectionVar = instructions[defInjectionVarStoreIndex].operand;
+			newInstructions.AddRange(new[]
 			{
 				// If defInjection == null, still need the english XComment.
-				new CodeInstruction(OpCodes.Ldloc_S, defInjectionLocalVar) { labels = { languageNotSameLabel } },
+				new CodeInstruction(OpCodes.Ldloc_S, defInjectionVar) { labels = { languageNotSameLabel } },
 				new CodeInstruction(OpCodes.Brfalse, tryStartLabel),
 
 				// If defInjection.isPlaceholder, still need the english XComment.
-				new CodeInstruction(OpCodes.Ldloc_S, defInjectionLocalVar),
+				new CodeInstruction(OpCodes.Ldloc_S, defInjectionVar),
 				new CodeInstruction(OpCodes.Ldfld, typeof(DefInjectionPackage.DefInjection).GetField(nameof(DefInjectionPackage.DefInjection.isPlaceholder))),
 				new CodeInstruction(OpCodes.Brtrue, tryStartLabel),
 
 				new CodeInstruction(OpCodes.Br, afterTryEndLabel),
-			};
+			});
 
 			// Finally insert all these new instructions before the try block containing the XComment.
-			instructions.InsertRange(tryStartIndex, newSameLanguageInstructions.Concat(newDifferentLanguageInstructions));
+			instructions.InsertRange(tryStartIndex, newInstructions);
 
 			var afterTryEndIndex = instructions.FindIndex(xCommentIndex + 1, instruction => instruction.labels.Contains(afterTryEndLabel));
 			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch:\n\t{instructions.RangeToDebugString(tryStartIndex, afterTryEndIndex - tryStartIndex + 1)}");
 			return afterTryEndIndex;
 		}
 
-		static CodeInstruction[] NormalizedPathLoadInstructions(List<CodeInstruction> instructions, int searchEndIndex, bool useNormalizedPathVar)
+		static CodeInstruction[] DefInjectionPackageInjectionsInstructions(LocalBuilder defInjectionPackageVar)
+		{
+			return new[]
+			{
+				new CodeInstruction(OpCodes.Ldloc_S, defInjectionPackageVar),
+				new CodeInstruction(OpCodes.Ldfld, typeof(DefInjectionPackage).GetField(nameof(DefInjectionPackage.injections))),
+			};
+		}
+
+		static CodeInstruction[] NormalizedPathLoadInstructions(List<CodeInstruction> instructions, int searchEndIndex)
 		{
 			var possibleDefInjectionType = typeof(TranslationFilesCleaner).GetNestedType("PossibleDefInjection", AccessTools.all);
 			var possibleDefInjectionLoadIndex = instructions.FindLastIndex(searchEndIndex, OpCodes.Ldloc_S.AsInstructionPredicate(possibleDefInjectionType.AsLocalVarTypePredicate()));
 			//Log.Message(instructions.ItemToDebugString(possibleDefInjectionLoadIndex, "possibleDefInjectionLoadIndex="));
-			if (useNormalizedPathVar)
+			return new[]
 			{
-				var normalizedPathLoadFieldIndex = instructions.FindLastIndex(possibleDefInjectionLoadIndex - 1,
-					OpCodes.Ldfld.AsInstructionPredicate(typeof(string).AsFieldTypePredicate(fieldName: "normalizedPath")));
-				var normalizedPathStoreIndex = instructions.FindIndex(normalizedPathLoadFieldIndex + 1, OpCodes.Stloc_S.AsInstructionPredicate());
-				//Log.Message(instructions.ItemToDebugString(normalizedPathStoreIndex, "normalizedPathStoreIndex="));
-				return new[]
-				{
-					instructions[normalizedPathStoreIndex].Clone(OpCodes.Ldloc_S),
-				};
-			}
-			else
-			{
-				return new[]
-				{
-					instructions[possibleDefInjectionLoadIndex].Clone(),
-					new CodeInstruction(OpCodes.Ldfld, possibleDefInjectionType.GetField("normalizedPath")),
-				};
-			}
+				instructions[possibleDefInjectionLoadIndex].Clone(),
+				new CodeInstruction(OpCodes.Ldfld, possibleDefInjectionType.GetField("normalizedPath")),
+			};
+		}
+
+		static int RemoveAllInjectionsWithIndexedPath(Dictionary<string, DefInjectionPackage.DefInjection> injections, string key)
+		{
+			// Same lambda logic as in DefInjectionPackage.CheckErrors, to prevent that method from returning false (and recording an error).
+			return injections.RemoveAll(pairPredicate: pair => !pair.Value.IsFullListInjection && pair.Key.StartsWith(key + "."));
 		}
 	}
 
@@ -833,7 +866,7 @@ namespace TranslationFilesGenerator
 				Debug.Log(sb.ToString());
 			} else
 			{
-				Debug.Log("PossibleDefInjection: translationAllowed=false");
+				//Debug.Log("PossibleDefInjection: translationAllowed=false");
 			}
 		}
 	}

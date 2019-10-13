@@ -73,6 +73,7 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="DebugExtensions.cs" />
     <Compile Include="HarmonyPatches.cs" />
     <Compile Include="HarmonyTranspilerExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
