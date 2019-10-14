@@ -28,6 +28,7 @@ namespace TranslationFilesGenerator
 			ModContentPack = modContentPack;
 			TargetLanguage = targetLanguage;
 			OriginalActiveLanguage = LanguageDatabase.activeLanguage;
+			Log.Message($"TranslationFilesGenerator.Begin: {ToString()}");
 			// Note: LanguageDatabase.activeLanguage is only changed within DoCleanupTranslationFiles,
 			// so that confirmation dialogs and such are still translated in the current active language.
 			TranslationFilesCleaner.CleanupTranslationFiles();
@@ -35,6 +36,7 @@ namespace TranslationFilesGenerator
 
 		public static void End()
 		{
+			Log.Message($"TranslationFilesGenerator.End: {ToString()}");
 			var targetLanguage = TargetLanguage;
 
 			// Resetting Instance has to be done separately in a DoCleanupTranslationFiles HarmonyPostfix patch (which calls this method),
@@ -52,6 +54,7 @@ namespace TranslationFilesGenerator
 				// Not using LanguageDatabase.SelectLanguage, since it's really slow.
 				activeLanguage.ResetDataAndErrors();
 				activeLanguage.InjectIntoData_AfterImpliedDefs();
+				Log.Message($"Reset language data for {targetLanguage}");
 			}
 		}
 

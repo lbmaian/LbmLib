@@ -13,11 +13,27 @@ namespace TranslationFilesGenerator
 			return enumerable as List<T> ?? new List<T>(enumerable);
 		}
 
+		// XXX: Needs a better name.
 		public static List<T> PopAll<T>(this ICollection<T> collection)
 		{
 			var collectionCopy = new List<T>(collection);
 			collection.Clear();
 			return collectionCopy;
+		}
+
+		// XXX: Needs a better name.
+		public static List<T> PopRange<T>(this List<T> list, int index, int count)
+		{
+			var range = list.GetRange(index, count);
+			list.RemoveRange(index, count);
+			return range;
+		}
+
+		public static List<T> AddDefaultIfEmpty<T>(this List<T> list, Func<T> defaultSupplier)
+		{
+			if (list.Count == 0)
+				list.Add(defaultSupplier());
+			return list;
 		}
 
 		public static int RemoveAll<K, V>(this Dictionary<K, V> dictionary, Predicate<K> keyPredicate = null, Predicate<V> valuePredicate = null, Predicate<KeyValuePair<K, V>> pairPredicate = null)

@@ -100,7 +100,7 @@ namespace TranslationFilesGenerator
 
 			// Insert a new Rect variable for a new button and a copy of the way they're initialized (and the label Rect is modified) before the other button Rect's are initialized.
 			var rectVar = ilGenerator.DeclareLocal(typeof(Rect));
-			var firstRectInitLoadIndex = instructions.FindIndex(OpCodes.Ldloca_S.AsInstructionPredicate<LocalBuilder>(localVar =>
+			var firstRectInitLoadIndex = instructions.FindIndex(OpCodes.Ldloca_S.AsInstructionPredicate().LocalBuilder(localVar =>
 				localVar.LocalIndex != 0 &&
 				localVar.LocalType == typeof(Rect)));
 			var firstRectSetHeightCallIndex = instructions.FindIndex(firstRectInitLoadIndex + 1,
@@ -181,7 +181,7 @@ namespace TranslationFilesGenerator
 		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
 
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable)
+		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, ILGenerator ilGenerator)
 		{
 			var instructions = instructionEnumerable.AsList();
 
@@ -196,8 +196,10 @@ namespace TranslationFilesGenerator
 			// activeLanguage and defaultLanguage are stored in variables which are used elsewhere, so don't skip the initialization of those.
 			var secondReturnIndex = instructions.FindIndex(firstReturnIndex + 1, OpCodes.Ret.AsInstructionPredicate());
 			var afterLanguageVarInitIndex = instructions.FindLastIndex(firstReturnIndex - 1, OpCodes.Stfld.AsInstructionPredicate()) + 1;
-			var afterChecksLabel = instructions[secondReturnIndex + 1].labels[0];
+			var afterChecksLabel = instructions[secondReturnIndex + 1].FirstOrNewAddedLabel(ilGenerator);
 			instructions.InsertRange(afterLanguageVarInitIndex, TranspilerSnippets.TranslationFilesModeCheckInstructions(TranslationFilesMode.GenerateForMod, afterChecksLabel));
+
+			// TODO: Call TranslationFilesGenerator.End() if LongEventHandler.QueueLongEvent doesn't happen (i.e. in the other if clauses), ideally in a finally block.
 
 			return instructions;
 		}
@@ -219,7 +221,7 @@ namespace TranslationFilesGenerator
 		static MethodInfo CalculateMethod(HarmonyInstance harmony)
 		{
 			// TranslationFilesCleaner.'<CleanupTranslationFiles>c__AnonStorey0'.'<>m__0'
-			// (first delegate method in TranslationFilesCleaner.CleanupTranslationFiles)
+			// (delegate internal method of first LongEventHandler.QueueLongEvent in TranslationFilesCleaner.CleanupTranslationFiles)
 			return typeof(TranslationFilesCleaner).GetNestedType("<CleanupTranslationFiles>c__AnonStorey0", AccessTools.all).GetMethod("<>m__0", AccessTools.all);
 		}
 
@@ -235,6 +237,8 @@ namespace TranslationFilesGenerator
 				new CodeInstruction(OpCodes.Call, typeof(TranslationFilesCleaner_CleanupTranslationFiles_Patch2).GetMethod(nameof(ModifyConfirmationDialog), AccessTools.all)),
 			});
 
+			// TODO: Call TranslationFilesGenerator.End() if Dialog_MessageBox.CreateConfirmation doesn't happen (i.e. in the other if clause), ideally in a finally block.
+
 			return instructions;
 		}
 
@@ -246,6 +250,7 @@ namespace TranslationFilesGenerator
 					TranslationFilesGenerator.TargetLanguage.LanguageLabel(),
 					LanguageDatabase.defaultLanguage.FriendlyNameNative);
 				confirmationDialog.buttonAText = "ConfirmGenerateTranslationFiles_Confirm".Translate();
+				confirmationDialog.buttonBAction = TranslationFilesGenerator.End;
 			}
 		}
 	}
@@ -260,7 +265,7 @@ namespace TranslationFilesGenerator
 		static MethodInfo CalculateMethod(HarmonyInstance harmony)
 		{
 			// TranslationFilesCleaner.'<CleanupTranslationFiles>c__AnonStorey0'.'<>m__1'
-			// (second delegate method in TranslationFilesCleaner.CleanupTranslationFiles)
+			// (delegate internal method of Dialog_MessageBox.CreateConfirmation in TranslationFilesCleaner.CleanupTranslationFiles)
 			return typeof(TranslationFilesCleaner).GetNestedType("<CleanupTranslationFiles>c__AnonStorey0", AccessTools.all).GetMethod("<>m__1", AccessTools.all);
 		}
 
@@ -274,15 +279,13 @@ namespace TranslationFilesGenerator
 
 			// Fix a TranslationFilesCleaner bug where Translated is called on the progress string, when it's already called within LongEventHandler,
 			// leading to weird pseudo-translation. Fix is to just remove the Translate call.
-			if (OpCodes.Call.AsInstructionPredicate(typeof(Translator).GetMethod(nameof(Translator.Translate), new[] { typeof(string) })).Invoke(instructions[afterProgressStrLoadIndex]))
+			if (OpCodes.Call.AsInstructionPredicate(typeof(Translator).GetMethod(nameof(Translator.Translate), new[] { typeof(string) }))(instructions[afterProgressStrLoadIndex]))
 				instructions.RemoveAt(afterProgressStrLoadIndex);
 
 			// Use GeneratingTranslationFilesForMod progress string key if TranslationFilesMode.GenerateInMod;
 			// else continue using existing CleaningTranslationFiles progress string key.
-			var progressStrLoadLabel = ilGenerator.DefineLabel();
-			instructions[progressStrLoadIndex].labels.Add(progressStrLoadLabel);
-			var afterProgressStrLoadLabel = ilGenerator.DefineLabel();
-			instructions[afterProgressStrLoadIndex].labels.Add(afterProgressStrLoadLabel);
+			var progressStrLoadLabel = instructions[progressStrLoadIndex].FirstOrNewAddedLabel(ilGenerator);
+			var afterProgressStrLoadLabel = instructions[afterProgressStrLoadIndex].FirstOrNewAddedLabel(ilGenerator);
 			var newProgressStrInstructions = TranspilerSnippets.TranslationFilesModeCheckInstructions(TranslationFilesMode.Clean, progressStrLoadLabel);
 			newProgressStrInstructions.AddRange(new[]
 			{
@@ -342,13 +345,16 @@ namespace TranslationFilesGenerator
 		static void ChangeToTargetLanguage()
 		{
 			var targetLanguage = TranslationFilesGenerator.TargetLanguage;
+			if (TranslationFilesGenerator.OriginalActiveLanguage != LanguageDatabase.activeLanguage)
+				throw new InvalidOperationException($"activeLanguage {LanguageDatabase.activeLanguage} " +
+					$"unexpectedly not OriginalActiveLanguage {TranslationFilesGenerator.OriginalActiveLanguage}");
 			if (targetLanguage != LanguageDatabase.activeLanguage)
 			{
 				LanguageDatabase.activeLanguage = targetLanguage;
 				targetLanguage.InjectIntoData_AfterImpliedDefs();
 				// TODO: Should DefInjectionPackage.DefInjection.fileSource and TranslationFilesCleaner.GetSourceFile be patched to include relative path,
 				// so that it would be possible to filter DefInjection by mod? While nice, it's not necessary and probably not worth the effort.
-				//Log.Message($"Change to language {targetLanguage}");
+				Log.Message($"Change activeLanguage from {TranslationFilesGenerator.OriginalActiveLanguage} to {targetLanguage}");
 			}
 		}
 
@@ -361,7 +367,7 @@ namespace TranslationFilesGenerator
 				targetLanguage.ResetDataAndErrors();
 				LanguageDatabase.activeLanguage = originalActiveLanguage;
 				originalActiveLanguage.InjectIntoData_AfterImpliedDefs();
-				//Log.Message($"Reset to language {originalActiveLanguage}");
+				Log.Message($"Reset language data for {targetLanguage} and change activeLanguage to {originalActiveLanguage}");
 			}
 		}
 	}
@@ -390,8 +396,7 @@ namespace TranslationFilesGenerator
 			// In the CleanupKeyedTranslations method, activeLanguage is a variable, but defaultLanguage is a field on an internal class (probably due to the usage of LINQ),
 			// so rather than deal with that weirdness, just add a no-dependency check at the beginning of the method
 			// where if the languages are same, do nothing and return early. In other words, if the languages are different, skip the early return.
-			var firstInstructionLabel = ilGenerator.DefineLabel();
-			instructions[0].labels.Add(firstInstructionLabel);
+			var firstInstructionLabel = instructions[0].FirstOrNewAddedLabel(ilGenerator);
 			var languageCheckInstructions = TranspilerSnippets.LanguageCheckInstructions(sameLanguage: false, firstInstructionLabel);
 			languageCheckInstructions.Add(new CodeInstruction(OpCodes.Ret));
 			instructions.InsertRange(0, languageCheckInstructions);
@@ -399,9 +404,79 @@ namespace TranslationFilesGenerator
 			// If the keyed translations folder doesn't exist, rather than erroring out like it originally does, create the folder instead,
 			// regardless of whether in Clean or GenerateForMod mode.
 			TranspilerSnippets.ReplaceFolderNotExistsErrorWithFolderCreate(instructions);
+			//Log.Message($"TranslationFilesCleaner_CleanupKeyedTranslations_Patch(afterfolder):\n\t{instructions.ToDebugString()}");
 
-			// TODO: Don't add english XComment if non-placeholder translation already exists.
+			// Don't add english XComment if non-placeholder translation already exists.
+			// This is done by transforming the following code:
+			//   foreach (XNode valueNode in keyElement.DescendantNodes())
+			//   {
+			//     // code for adding english XComment beginning with try block
+			//     valueNode.Remove();
+			//   }
+			//   try
+			//   {
+			//     if (activeLanguage.TryGetTextFromKey(keyElement.Name.ToString(), out string translated))
+			//     ...
+			// to:
+			//   try
+			//   {
+			//     bool isTranslated = activeLanguage.TryGetTextFromKey(keyElement.Name.ToString(), out string translated);
+			//     foreach (XNode valueNode in keyElement.DescendantNodes())
+			//     {
+			//       if (!isTranslated || TranslationFilesGenerator.Mode != TranslationFilesMode.GenerateForMod)
+			//       {
+			//         // code for adding english XComment
+			//       }
+			//       valueNode.Remove();
+			//     }
+			//     if (isTranslated)
+			//     ...
 
+			// First find relevant instruction indices.
+			var tryGetTextFromKeyCallIndex = instructions.FindIndex(
+				OpCodes.Callvirt.AsInstructionPredicate(typeof(LoadedLanguage).GetMethod(nameof(LoadedLanguage.TryGetTextFromKey))));
+			//Log.Message(instructions.ItemToDebugString(tryGetTextFromKeyCallIndex, "tryGetTextFromKeyCallIndex="));
+			var tryStartIndex = instructions.FindLastIndex(tryGetTextFromKeyCallIndex - 1, ExceptionBlockType.BeginExceptionBlock.AsInstructionPredicate());
+			//Log.Message(instructions.ItemToDebugString(tryStartIndex, "tryStartIndex="));
+			var englishValueNodeLoopStartIndex = instructions.FindLastIndex(tryStartIndex - 1,
+				OpCodes.Callvirt.AsInstructionPredicate(typeof(XContainer).GetMethod(nameof(XContainer.DescendantNodes)))) - 1;
+			//Log.Message(instructions.ItemToDebugString(englishValueNodeLoopStartIndex, "englishValueNodeLoopStartIndex="));
+			var xCommentConstructIndex = instructions.FindIndex(englishValueNodeLoopStartIndex + 1,
+				OpCodes.Newobj.AsInstructionPredicate(typeof(XComment).GetConstructor(new[] { typeof(string) })));
+			//Log.Message(instructions.ItemToDebugString(xCommentConstructIndex, "xCommentConstructIndex="));
+			var englishCommentStartIndex = instructions.FindLastIndex(xCommentConstructIndex - 1, ExceptionBlockType.BeginExceptionBlock.AsInstructionPredicate());
+			//Log.Message(instructions.ItemToDebugString(englishCommentStartIndex, "englishCommentStartIndex="));
+			var afterEnglishCommentLabel = (Label)instructions[instructions.FindIndex(englishCommentStartIndex + 1, OpCodes.Leave.AsInstructionPredicate())].operand;
+
+			// Get and remove the instructions from the try start to the TryGetTextFromKey call, adding the new isTranslated var store instruction at the end.
+			var tryStartToIsTranslatedStoreInstructions = instructions.PopRange(tryStartIndex, tryGetTextFromKeyCallIndex + 1 - tryStartIndex);
+			var isTranslatedVar = ilGenerator.DeclareLocal(typeof(bool));
+			tryStartToIsTranslatedStoreInstructions.Add(new CodeInstruction(OpCodes.Stloc_S, isTranslatedVar));
+
+			// The above removed instructions are replaced with a single isTranslated var load instruction.
+			// This is also conveniently the first instructions after the english value node loop.
+			var afterEnglishValueNodeLoopLabels = tryStartToIsTranslatedStoreInstructions[0].labels.PopAll().AddDefaultIfEmpty(() => ilGenerator.DefineLabel());
+			instructions.Insert(tryStartIndex, new CodeInstruction(OpCodes.Ldloc_S, isTranslatedVar) { labels = afterEnglishValueNodeLoopLabels });
+
+			// Insert TranslationFilesMode.GenerateForMod and isTranslated checks that if both true, skip to after the english XComment code.
+			// Or in equivalent optimized CIL logic for logical AND:
+			//   if (!isTranslated) goto englishCommentLabel;
+			//   if (TranslationFilesGenerator.Mode == TranslationFiles.GenerateForMod) goto afterEnglishCommentLabel;
+			var englishCommentLabel = instructions[englishCommentStartIndex].FirstOrNewAddedLabel(ilGenerator);
+			var newCheckInstructions = new List<CodeInstruction>()
+			{
+				new CodeInstruction(OpCodes.Ldloc_S, isTranslatedVar),
+				new CodeInstruction(OpCodes.Brfalse, englishCommentLabel),
+			};
+			newCheckInstructions.AddRange(TranspilerSnippets.TranslationFilesModeCheckInstructions(TranslationFilesMode.GenerateForMod, afterEnglishCommentLabel));
+			instructions.InsertRange(englishCommentStartIndex, newCheckInstructions);
+
+			// The above removed instructions (plus isTranslated var store instruction) are inserted to above the english value node loop code
+			// (and the added checks and english XComment code within the loop).
+			tryStartToIsTranslatedStoreInstructions[0].labels.AddRange(instructions[englishValueNodeLoopStartIndex].labels.PopAll());
+			instructions.InsertRange(englishValueNodeLoopStartIndex, tryStartToIsTranslatedStoreInstructions);
+
+			//Log.Message($"TranslationFilesCleaner_CleanupKeyedTranslations_Patch(after):\n\t{instructions.ToDebugString()}");
 			return instructions;
 		}
 	}
@@ -420,12 +495,10 @@ namespace TranslationFilesGenerator
 			// Add a TranslationFilesMode check to skip backstory translations in GenerateForMod mode.
 			// This is necessary because mods (except the Core mod) are not allowed to define backstories the vanilla way.
 			// (Instead, there are various other mod implementations that typically involve defining backstories via a custom Def type.)
-			var firstInstructionLabel = ilGenerator.DefineLabel();
-			instructions[0].labels.Add(firstInstructionLabel);
+			var firstInstructionLabel = instructions[0].FirstOrNewAddedLabel(ilGenerator);
 			var translationFilesModeCheckInstructions = TranspilerSnippets.TranslationFilesModeCheckInstructions(TranslationFilesMode.Clean, firstInstructionLabel);
+			translationFilesModeCheckInstructions.Add(new CodeInstruction(OpCodes.Ret));
 			instructions.InsertRange(0, translationFilesModeCheckInstructions);
-			// Do nothing and return early when TranslationFilesMode isn't Clean mode.
-			instructions.Insert(translationFilesModeCheckInstructions.Count, new CodeInstruction(OpCodes.Ret));
 
 			return instructions;
 		}
@@ -577,7 +650,7 @@ namespace TranslationFilesGenerator
 			// Need a DefInjectionPackage var for ModifyInjection.
 			// Initialize it to GetDefInjectionPackage(activeLanguage, defType).
 			var defInjectionPackageVar = ilGenerator.DeclareLocal(typeof(DefInjectionPackage));
-			var activeLanguageStoreIndex = instructions.FindIndex(OpCodes.Stloc_S.AsInstructionPredicate(typeof(LoadedLanguage).AsLocalVarTypePredicate()));
+			var activeLanguageStoreIndex = instructions.FindIndex(OpCodes.Stloc_S.AsInstructionPredicate().LocalBuilder(typeof(LoadedLanguage)));
 			var defInjectionVarInitInstructions = new[]
 			{
 				instructions[activeLanguageStoreIndex].Clone(OpCodes.Ldloc_S),
@@ -590,12 +663,12 @@ namespace TranslationFilesGenerator
 			// Also need a FileInfo translationFile var for ModifyInjection.
 			var translationFileVar = ilGenerator.DeclareLocal(typeof(FileInfo));
 			// Annoyingly, fileName is a field stored in an object of an internal type, rather than a local var.
-			var xDocumentVarStoreIndex = instructions.FindIndex(defInjectionVarInitInstructions.Length + 1, OpCodes.Stloc_S.AsInstructionPredicate(typeof(XDocument).AsLocalVarTypePredicate()));
+			var xDocumentVarStoreIndex = instructions.FindIndex(defInjectionVarInitInstructions.Length + 1, OpCodes.Stloc_S.AsInstructionPredicate().LocalBuilder(typeof(XDocument)));
 			//Log.Message(instructions.ItemToDebugString(xDocumentVarStoreIndex, "xDocumentVarStoreIndex="));
 			var fileNameFieldStoreIndex = instructions.FindLastIndex(xDocumentVarStoreIndex - 1,
-				OpCodes.Stfld.AsInstructionPredicate(typeof(string).AsFieldTypePredicate(fieldName: "fileName")));
+				OpCodes.Stfld.AsInstructionPredicate().FieldInfo(fieldType: typeof(string), fieldName: "fileName"));
 			//Log.Message(instructions.ItemToDebugString(fileNameFieldStoreIndex, "fileNameFieldStoreIndex="));
-			var fileNameHolderLoadIndex = instructions.FindLastIndex(fileNameFieldStoreIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate<LocalBuilder>(localVar =>
+			var fileNameHolderLoadIndex = instructions.FindLastIndex(fileNameFieldStoreIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate().LocalBuilder(localVar =>
 				localVar.LocalType.GetField("fileName", AccessTools.all) is FieldInfo field &&
 				field.FieldType == typeof(string)));
 			//Log.Message(instructions.ItemToDebugString(fileNameHolderLoadIndex, "fileNameHolderLoadIndex="));
@@ -614,7 +687,7 @@ namespace TranslationFilesGenerator
 				new CodeInstruction(OpCodes.Stloc_S, translationFileVar),
 			};
 			instructions.InsertRange(xDocumentVarStoreIndex + 1, translationFileVarInitInstructions);
-			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(varinit):\n{instructions.ToDebugString()}");
+			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(aftervarinit):\n{instructions.ToDebugString()}");
 
 			// Skip first XComment since it's just the dummy <!--NEWLINE-->.
 			var searchStartIndex = xDocumentVarStoreIndex + 1 + translationFileVarInitInstructions.Length + 1;
@@ -629,13 +702,12 @@ namespace TranslationFilesGenerator
 				OpCodes.Call.AsInstructionPredicate(typeof(TranslationFilesCleaner).GetMethod("GetEnglishList", AccessTools.all)));
 			//Log.Message(instructions.ItemToDebugString(getEnglishListCallIndex, "getEnglishListCallIndex="));
 			var hasExistingInjectionVarStoreIndex = instructions.FindIndex(getEnglishListCallIndex + 1,
-				OpCodes.Stloc_S.AsInstructionPredicate(typeof(bool).AsLocalVarTypePredicate()));
+				OpCodes.Stloc_S.AsInstructionPredicate().LocalBuilder(typeof(bool)));
 			//Log.Message(instructions.ItemToDebugString(hasExistingInjectionVarStoreIndex, "hasExistingInjectionVarStoreIndex="));
 			var hasExistingInjectionVarLoadIndex = instructions.FindIndex(hasExistingInjectionVarStoreIndex + 1,
 				OpCodes.Ldloc_S.AsInstructionPredicate(instructions[hasExistingInjectionVarStoreIndex].operand));
 			//Log.Message(instructions.ItemToDebugString(hasExistingInjectionVarLoadIndex, "hasExistingInjectionVarLoadIndex="));
-			var partialListInjectionLabel = ilGenerator.DefineLabel();
-			instructions[hasExistingInjectionVarLoadIndex].labels.Add(partialListInjectionLabel);
+			var partialListInjectionLabel = instructions[hasExistingInjectionVarLoadIndex].FirstOrNewAddedLabel(ilGenerator);
 			var languageCheckInstructions = TranspilerSnippets.LanguageCheckInstructions(sameLanguage: true, partialListInjectionLabel);
 			instructions.InsertRange(hasExistingInjectionVarStoreIndex + 1, languageCheckInstructions);
 
@@ -681,15 +753,14 @@ namespace TranslationFilesGenerator
 		static int ModifyInjection(List<CodeInstruction> instructions, ILGenerator ilGenerator, LocalBuilder defInjectionPackageVar, LocalBuilder translationFileVar,
 			int searchStartIndex, bool skipSameLanguageInjection, bool fullListInsertion)
 		{
-			var xCommentIndex = instructions.FindIndex(searchStartIndex, OpCodes.Newobj.AsInstructionPredicate(typeof(XComment).GetConstructor(new[] { typeof(string) })));
-			//Log.Message(instructions.ItemToDebugString(xCommentIndex, "xCommentIndex="));
-			var tryStartIndex = instructions.FindLastIndex(xCommentIndex - 1,
-				instruction => instruction.blocks.Any(block => block.blockType == ExceptionBlockType.BeginExceptionBlock));
+			var xCommentConstructIndex = instructions.FindIndex(searchStartIndex, OpCodes.Newobj.AsInstructionPredicate(typeof(XComment).GetConstructor(new[] { typeof(string) })));
+			//Log.Message(instructions.ItemToDebugString(xCommentConstructIndex, "xCommentConstructIndex="));
+			var tryStartIndex = instructions.FindLastIndex(xCommentConstructIndex - 1, ExceptionBlockType.BeginExceptionBlock.AsInstructionPredicate());
 			//Log.Message(instructions.ItemToDebugString(tryStartIndex, "tryStartIndex="));
-			var afterTryEndLabel = (Label)instructions[instructions.FindIndex(xCommentIndex + 1, OpCodes.Leave.AsInstructionPredicate())].operand;
-			//Log.Message(instructions.ItemToDebugString(instructions.FindIndex(xCommentIndex + 1, instruction => instruction.labels.Contains(afterTryEndLabel)), "afterTryEndIndex="));
+			var afterTryEndLabel = (Label)instructions[instructions.FindIndex(xCommentConstructIndex + 1, OpCodes.Leave.AsInstructionPredicate())].operand;
+			//Log.Message(instructions.ItemToDebugString(instructions.FindIndex(xCommentConstructIndex + 1, afterTryEndLabel.AsInstructionPredicate()), "afterTryEndIndex="));
 			var defInjectionVarStoreIndex = instructions.FindLastIndex(tryStartIndex - 1,
-				OpCodes.Stloc_S.AsInstructionPredicate(typeof(DefInjectionPackage.DefInjection).AsLocalVarTypePredicate()));
+				OpCodes.Stloc_S.AsInstructionPredicate().LocalBuilder(typeof(DefInjectionPackage.DefInjection)));
 			//Log.Message(instructions.ItemToDebugString(defInjectionVarStoreIndex, "defInjectionVarStoreIndex="));
 
 			// All the following new logic which is going to be injected right before the try block containing the english XComment.
@@ -706,7 +777,7 @@ namespace TranslationFilesGenerator
 
 				// If an injection for the normalizedPath exists, remove it.
 				var defInjectionPackageInjectionsInstructions = DefInjectionPackageInjectionsInstructions(defInjectionPackageVar);
-				var normalizedPathLoadInstructions = NormalizedPathLoadInstructions(instructions, xCommentIndex - 1);
+				var normalizedPathLoadInstructions = NormalizedPathLoadInstructions(instructions, xCommentConstructIndex - 1);
 				newInstructions.AddRange(defInjectionPackageInjectionsInstructions);
 				newInstructions.AddRange(normalizedPathLoadInstructions);
 				newInstructions.AddRange(new[]
@@ -738,8 +809,8 @@ namespace TranslationFilesGenerator
 				if (fullListInsertion)
 				{
 					// Get fullListInjection list, then call defInjectionPackage.TryAddFullListInjection(translationFile, normalizedPath, englishList.AsList(), null).
-					var englishListVarLoadIndex = instructions.FindLastIndex(xCommentIndex - 1,
-						OpCodes.Ldloc_S.AsInstructionPredicate(typeof(IEnumerable<string>).AsLocalVarTypePredicate(useIsAssignableFrom: true)));
+					var englishListVarLoadIndex = instructions.FindLastIndex(xCommentConstructIndex - 1,
+						OpCodes.Ldloc_S.AsInstructionPredicate().LocalBuilder(typeof(IEnumerable<string>), useIsAssignableFrom: true));
 					//Log.Message(instructions.ItemToDebugString(englishListVarLoadIndex, "englishListVarLoadIndex="));
 					newInstructions.AddRange(new[]
 					{
@@ -752,7 +823,7 @@ namespace TranslationFilesGenerator
 				else
 				{
 					// Get injection, then call defInjectionPackage.TryAddInjection(translationFile, normalizedPath, englishStr).
-					var englishStrVarLoadIndex = instructions.FindLastIndex(xCommentIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate(typeof(string).AsLocalVarTypePredicate()));
+					var englishStrVarLoadIndex = instructions.FindLastIndex(xCommentConstructIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate().LocalBuilder(typeof(string)));
 					//Log.Message(instructions.ItemToDebugString(englishStrVarLoadIndex, "englishStrVarLoadIndex="));
 					newInstructions.AddRange(new[]
 					{
@@ -781,8 +852,7 @@ namespace TranslationFilesGenerator
 			}
 
 			// In the activeLanguage != defaultLanguage case, don't add the english XComment if a non-placeholder injection already exists.
-			var tryStartLabel = ilGenerator.DefineLabel();
-			instructions[tryStartIndex].labels.Add(tryStartLabel);
+			var tryStartLabel = instructions[tryStartIndex].FirstOrNewAddedLabel(ilGenerator);
 			var defInjectionVar = instructions[defInjectionVarStoreIndex].operand;
 			newInstructions.AddRange(new[]
 			{
@@ -801,7 +871,7 @@ namespace TranslationFilesGenerator
 			// Finally insert all these new instructions before the try block containing the XComment.
 			instructions.InsertRange(tryStartIndex, newInstructions);
 
-			var afterTryEndIndex = instructions.FindIndex(xCommentIndex + 1, instruction => instruction.labels.Contains(afterTryEndLabel));
+			var afterTryEndIndex = instructions.FindIndex(xCommentConstructIndex + 1, afterTryEndLabel.AsInstructionPredicate());
 			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch:\n\t{instructions.RangeToDebugString(tryStartIndex, afterTryEndIndex - tryStartIndex + 1)}");
 			return afterTryEndIndex;
 		}
@@ -818,7 +888,7 @@ namespace TranslationFilesGenerator
 		static CodeInstruction[] NormalizedPathLoadInstructions(List<CodeInstruction> instructions, int searchEndIndex)
 		{
 			var possibleDefInjectionType = typeof(TranslationFilesCleaner).GetNestedType("PossibleDefInjection", AccessTools.all);
-			var possibleDefInjectionLoadIndex = instructions.FindLastIndex(searchEndIndex, OpCodes.Ldloc_S.AsInstructionPredicate(possibleDefInjectionType.AsLocalVarTypePredicate()));
+			var possibleDefInjectionLoadIndex = instructions.FindLastIndex(searchEndIndex, OpCodes.Ldloc_S.AsInstructionPredicate().LocalBuilder(possibleDefInjectionType));
 			//Log.Message(instructions.ItemToDebugString(possibleDefInjectionLoadIndex, "possibleDefInjectionLoadIndex="));
 			return new[]
 			{
@@ -834,7 +904,7 @@ namespace TranslationFilesGenerator
 		}
 	}
 
-	// TODO: Patch SaveXMLDocumentWithProcessedNewlineTags to add EOF newline.
+	// TODO: Patch SaveXMLDocumentWithProcessedNewlineTags with options to add EOF newline and prevent UTF BOM.
 
 	// Uncomment following line to log all PossibleDefInjection's to output_log.txt.
 	//[HarmonyPatch]

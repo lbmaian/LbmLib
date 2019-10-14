@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text;
 using Harmony;
+using Harmony.ILCopying;
 
 namespace TranslationFilesGenerator
 {
@@ -60,6 +61,12 @@ namespace TranslationFilesGenerator
 				clonedInstructions.Add(instructions[index + i].Clone());
 			}
 			return clonedInstructions;
+		}
+
+		// Gets the first label of an instruction, adding a new one if it doesn't exist.
+		public static Label FirstOrNewAddedLabel(this CodeInstruction instruction, ILGenerator ilGenerator)
+		{
+			return instruction.labels.AddDefaultIfEmpty(() => ilGenerator.DefineLabel())[0];
 		}
 
 		// Replaces ldloc.<num>/stloc.<num> instructions with ldloc.s/stloc.s instructions with (potentially dummy) LocalBuilder operands.
@@ -167,35 +174,75 @@ namespace TranslationFilesGenerator
 			return instruction => instruction.opcode == opcode && instruction.operand == operand;
 		}
 
-		public static Predicate<CodeInstruction> AsInstructionPredicate<T>(this OpCode opcode, Predicate<T> operandPredicate) where T : class
+		public static Predicate<CodeInstruction> Operand(this Predicate<CodeInstruction> instructionPredicate, object operand)
 		{
-			return instruction => instruction.opcode == opcode && instruction.operand is T typedOperand && operandPredicate.Invoke(typedOperand);
+			return instruction => instructionPredicate(instruction) && instruction.operand == operand;
 		}
 
-		public static Predicate<LocalBuilder> AsLocalVarTypePredicate(this Type localVarType, bool useIsAssignableFrom = false)
+		public static Predicate<CodeInstruction> Operand<T>(this Predicate<CodeInstruction> instructionPredicate, Predicate<T> operandPredicate) where T : class
+		{
+			return instruction => instructionPredicate(instruction) && instruction.operand is T typedOperand && operandPredicate(typedOperand);
+		}
+
+		public static Predicate<CodeInstruction> LocalBuilder(this Predicate<CodeInstruction> instructionPredicate, Predicate<LocalBuilder> operandPredicate)
+		{
+			return instructionPredicate.Operand(operandPredicate);
+		}
+
+		public static Predicate<CodeInstruction> LocalBuilder(this Predicate<CodeInstruction> instructionPredicate, Type localBuilderType, bool useIsAssignableFrom = false)
 		{
 			if (useIsAssignableFrom)
-				return localVar => localVarType.IsAssignableFrom(localVar.LocalType);
+				return instructionPredicate.LocalBuilder(localBuilder => localBuilderType.IsAssignableFrom(localBuilder.LocalType));
 			else
-				return localVar => localVarType == localVar.LocalType;
+				return instructionPredicate.LocalBuilder(localBuilder => localBuilderType == localBuilder.LocalType);
 		}
 
-		public static Predicate<FieldInfo> AsFieldTypePredicate(this Type fieldType, string fieldName = null, bool useIsAssignableFrom = false)
+		public static Predicate<CodeInstruction> FieldInfo(this Predicate<CodeInstruction> instructionPredicate, Predicate<FieldInfo> operandPredicate)
+		{
+			return instructionPredicate.Operand(operandPredicate);
+		}
+
+		public static Predicate<CodeInstruction> FieldInfo(this Predicate<CodeInstruction> instructionPredicate, Type fieldType, string fieldName = null, bool useIsAssignableFrom = false)
 		{
 			if (fieldName != null)
 			{
 				if (useIsAssignableFrom)
-					return field => fieldType.IsAssignableFrom(field.FieldType) && field.Name == fieldName;
+					return instructionPredicate.FieldInfo(field => fieldType.IsAssignableFrom(field.FieldType) && field.Name == fieldName);
 				else
-					return field => fieldType == field.FieldType && field.Name == fieldName;
+					return instructionPredicate.FieldInfo(field => fieldType == field.FieldType && field.Name == fieldName);
 			}
 			else
 			{
 				if (useIsAssignableFrom)
-					return field => fieldType.IsAssignableFrom(field.FieldType);
+					return instructionPredicate.FieldInfo(field => fieldType.IsAssignableFrom(field.FieldType));
 				else
-					return field => fieldType == field.FieldType;
+					return instructionPredicate.FieldInfo(field => fieldType == field.FieldType);
 			}
+		}
+
+		public static Predicate<CodeInstruction> AsInstructionPredicate(this Label label)
+		{
+			return instruction => instruction.labels.Contains(label);
+		}
+
+		public static Predicate<CodeInstruction> HasLabel(this Predicate<CodeInstruction> instructionPredicate, Label label)
+		{
+			return instruction => instructionPredicate(instruction) && instruction.labels.Contains(label);
+		}
+
+		public static Predicate<CodeInstruction> AsInstructionPredicate(this ExceptionBlockType blockType)
+		{
+			return instruction => instruction.blocks.Any(block => block.blockType == blockType);
+		}
+
+		public static Predicate<CodeInstruction> HasBlock(this Predicate<CodeInstruction> instructionPredicate, ExceptionBlockType blockType)
+		{
+			return instruction => instructionPredicate(instruction) && instruction.blocks.Any(block => block.blockType == blockType);
+		}
+
+		public static Predicate<CodeInstruction> HasBlock(this Predicate<CodeInstruction> instructionPredicate, Type catchType)
+		{
+			return instruction => instructionPredicate(instruction) && instruction.blocks.Any(block => block.catchType == catchType);
 		}
 
 		// Convenience method for changing an intruction's opcode and operand, while keeping labels and blocks.
