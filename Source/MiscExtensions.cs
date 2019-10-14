@@ -92,15 +92,6 @@ namespace TranslationFilesGenerator
 			language.anyError = false;
 			language.icon = BaseContent.BadTex;
 			language.keyedReplacements.Clear();
-			// Resetting each DefInjectionPackage shouldn't be necessary since the list of them is being cleared,
-			// but just in case if something still has a reference to it...
-			foreach (var defInjectionPackage in language.defInjections)
-			{
-				defInjectionPackage.injections.Clear();
-				defInjectionPackage.loadErrors.Clear();
-				defInjectionPackage.loadSyntaxSuggestions.Clear();
-				defInjectionPackage.usedOldRepSyntax = false;
-			}
 			language.defInjections.Clear();
 			language.stringFiles.Clear();
 			var wordInfo = (LanguageWordInfo)typeof(LoadedLanguage).GetField("wordInfo", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(language);

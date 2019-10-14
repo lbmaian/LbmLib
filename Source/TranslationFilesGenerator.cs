@@ -1,4 +1,6 @@
-﻿using Verse;
+﻿using System.Collections.Generic;
+using System.Linq;
+using Verse;
 
 namespace TranslationFilesGenerator
 {
@@ -28,7 +30,7 @@ namespace TranslationFilesGenerator
 			ModContentPack = modContentPack;
 			TargetLanguage = targetLanguage;
 			OriginalActiveLanguage = LanguageDatabase.activeLanguage;
-			Log.Message($"TranslationFilesGenerator.Begin: {ToString()}");
+			//Log.Message($"TranslationFilesGenerator.Begin: {ToString()}");
 			// Note: LanguageDatabase.activeLanguage is only changed within DoCleanupTranslationFiles,
 			// so that confirmation dialogs and such are still translated in the current active language.
 			TranslationFilesCleaner.CleanupTranslationFiles();
@@ -36,7 +38,28 @@ namespace TranslationFilesGenerator
 
 		public static void End()
 		{
-			Log.Message($"TranslationFilesGenerator.End: {ToString()}");
+			//Log.Message($"TranslationFilesGenerator.End: {ToString()}");
+
+			var targetLanguage = TargetLanguage;
+			if (targetLanguage != OriginalActiveLanguage)
+			{
+				// Revert the injections from the target language.
+				// This is done by setting each injection's translation string/list to the replaced string/list, then calling InjectIntoData_BeforeImpliedDefs
+				// (which unlike InjectIntoData_AfterImpliedDefs doesn't log load errors nor unnecessarily inject backstory data).
+				var defInjections = targetLanguage.defInjections.SelectMany(defInjectionPackage => defInjectionPackage.injections.Values);
+				foreach (DefInjectionPackage.DefInjection defInjection in defInjections)
+				{
+					if (defInjection.IsFullListInjection)
+						defInjection.fullListInjection = defInjection.replacedList.AsList();
+					else
+						defInjection.injection = defInjection.replacedString;
+					defInjection.injected = false;
+				}
+				targetLanguage.InjectIntoData_BeforeImpliedDefs();
+				// Resetting the target language technically isn't necessary, but it does save a bit of memory.
+				targetLanguage.ResetDataAndErrors();
+			}
+
 			// Resetting Instance has to be done separately in a DoCleanupTranslationFiles HarmonyPostfix patch (which calls this method),
 			// since TranslationFilesCleaner uses LongEventHandler for deferring execution.
 			Mode = TranslationFilesMode.Clean;
@@ -44,15 +67,14 @@ namespace TranslationFilesGenerator
 			TargetLanguage = null;
 			OriginalActiveLanguage = null;
 
-			// TODO: This doesn't seem to working properly, since injected translations from other languages can appear in the old active language - investigate.
 			// We need to reload the language data now that it's either switched back to or updated.
 			// This needs to be done AFTER the above arguments are reset, so that the changes in the LoadedLanguage HarmonyTranspiler patch are effectively reverted.
 			var activeLanguage = LanguageDatabase.activeLanguage;
 			// Not using LanguageDatabase.SelectLanguage, since it's really slow.
-			// TODO: Reload target mod defs. But this isn't simple due to XML inheritance and patching logic.
 			activeLanguage.ResetDataAndErrors();
+			// InjectIntoData_AfterImpliedDefs does everything InjectIntoData_BeforeImpliedDefs does along with load error logging and backstory load/injections.
 			activeLanguage.InjectIntoData_AfterImpliedDefs();
-			Log.Message($"Reset language data for {activeLanguage}");
+			//Log.Message($"Reload language {activeLanguage}");
 		}
 
 		public static new string ToString()

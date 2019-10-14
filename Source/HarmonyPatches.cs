@@ -247,6 +247,7 @@ namespace TranslationFilesGenerator
 					LanguageDatabase.defaultLanguage.FriendlyNameNative);
 				confirmationDialog.buttonAText = "ConfirmGenerateTranslationFiles_Confirm".Translate();
 				confirmationDialog.buttonBAction = TranslationFilesGenerator.End;
+				confirmationDialog.cancelAction = TranslationFilesGenerator.End;
 			}
 		}
 	}
@@ -311,6 +312,7 @@ namespace TranslationFilesGenerator
 		[HarmonyPostfix]
 		static void Postfix()
 		{
+			// TODO: Currently this does NOT act as a finally block - if the method throws an exception, postfixes don't run!
 			// Note that this acts as a finally block for the whole method, so it's guaranteed to run.
 			// See comments in TranslationFilesGenerator.End.
 			ResetToOriginalActiveLanguage();
@@ -347,10 +349,10 @@ namespace TranslationFilesGenerator
 			if (targetLanguage != LanguageDatabase.activeLanguage)
 			{
 				LanguageDatabase.activeLanguage = targetLanguage;
-				targetLanguage.InjectIntoData_AfterImpliedDefs();
+				targetLanguage.InjectIntoData_BeforeImpliedDefs();
 				// TODO: Should DefInjectionPackage.DefInjection.fileSource and TranslationFilesCleaner.GetSourceFile be patched to include relative path,
 				// so that it would be possible to filter DefInjection by mod? While nice, it's not necessary and probably not worth the effort.
-				Log.Message($"Change activeLanguage from {TranslationFilesGenerator.OriginalActiveLanguage} to {targetLanguage}");
+				//Log.Message($"Change activeLanguage from {TranslationFilesGenerator.OriginalActiveLanguage} to {targetLanguage}");
 			}
 		}
 
@@ -360,9 +362,8 @@ namespace TranslationFilesGenerator
 			var originalActiveLanguage = TranslationFilesGenerator.OriginalActiveLanguage;
 			if (targetLanguage != originalActiveLanguage)
 			{
-				targetLanguage.ResetDataAndErrors();
 				LanguageDatabase.activeLanguage = originalActiveLanguage;
-				Log.Message($"Reset language data for {targetLanguage} and change activeLanguage to {originalActiveLanguage}");
+				//Log.Message($"Reset activeLanguage back to {originalActiveLanguage}");
 				// Note: Reloading the original activeLanguage will be done in TranslationFilesGenerator.End after the arguments are reset,
 				// so that the changes in the LoadedLanguage HarmonyTranspiler patch are effectively reverted.
 			}
@@ -627,7 +628,7 @@ namespace TranslationFilesGenerator
 				var translationFilesGeneratorMod = LoadedModManager.GetMod<TranslationFilesGeneratorMod>().Content;
 				mods = mods.Where(mod => mod == translationFilesGeneratorMod || mod == TranslationFilesGenerator.ModContentPack);
 			}
-			Log.Message($"LoadedLanguage_FolderPaths_Patch.GetMods:\n\t{mods.Join("\n\t")}");
+			//Log.Message($"LoadedLanguage_FolderPaths_Patch.GetMods:\n\t{mods.Join("\n\t")}");
 			return mods;
 		}
 	}
@@ -643,10 +644,6 @@ namespace TranslationFilesGenerator
 		{
 			var instructions = instructionEnumerable.DeoptimizeLocalVarInstructions(ilGenerator).AsList();
 			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(before):\n{instructions.ToDebugString()}");
-
-			// TEMP
-			instructions.Insert(instructions.FindIndex(OpCodes.Stloc_S.AsInstructionPredicate().LocalBuilder(2)),
-				new CodeInstruction(OpCodes.Call, typeof(TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch).GetMethod(nameof(DebugLog), AccessTools.all)));
 
 			// Need a DefInjectionPackage var for ModifyInjection.
 			// Initialize it to GetDefInjectionPackage(activeLanguage, defType).
@@ -738,14 +735,6 @@ namespace TranslationFilesGenerator
 
 			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(after):\n{instructions.ToDebugString()}");
 			return instructions.ReoptimizeLocalVarInstructions();
-		}
-
-		static List<KeyValuePair<string, DefInjectionPackage.DefInjection>> DebugLog(List<KeyValuePair<string, DefInjectionPackage.DefInjection>> existingNonPlaceholderInjections)
-		{
-			Log.Message("existingNonPlaceholderInjections:\n\t" + existingNonPlaceholderInjections.Select(pair => pair.Value).Select(injection =>
-				$"normalizedPath={injection.normalizedPath}, injected={injection.injected}, replacedString={injection.replacedString.ToStringSafe()}, " +
-				$"injection={injection.injection.ToStringSafe()}, fullListInjection={injection.fullListInjection.ToStringSafeEnumerable()}").Join("\n\t"));
-			return existingNonPlaceholderInjections;
 		}
 
 		static DefInjectionPackage GetDefInjectionPackage(LoadedLanguage language, Type defType)
