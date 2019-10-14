@@ -189,6 +189,11 @@ namespace TranslationFilesGenerator
 			return instructionPredicate.Operand(operandPredicate);
 		}
 
+		public static Predicate<CodeInstruction> LocalBuilder(this Predicate<CodeInstruction> instructionPredicate, int localIndex)
+		{
+			return instructionPredicate.LocalBuilder(localBuilder => localBuilder.LocalIndex == localIndex);
+		}
+
 		public static Predicate<CodeInstruction> LocalBuilder(this Predicate<CodeInstruction> instructionPredicate, Type localBuilderType, bool useIsAssignableFrom = false)
 		{
 			if (useIsAssignableFrom)

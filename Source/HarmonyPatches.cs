@@ -129,12 +129,10 @@ namespace TranslationFilesGenerator
 
 		static void DialogModLister()
 		{
-			// Only lists local (non-Steam) and non-Core mods, since such mods are presumably mutable and possibly in development.
-			// Also implicitly filters for active mods, since only Defs are loaded from active mods.
-			var options = LoadedModManager.RunningMods
-				.Where(mod => !ModLister.GetModWithIdentifier(mod.Identifier).OnSteamWorkshop && !mod.IsCoreMod)
-				.Select(mod => new DebugMenuOption(mod.Name, DebugMenuOptionMode.Action, () => DialogLanguageLister(mod)));
-			Find.WindowStack.Add(new Dialog_DebugOptionListLister(options));
+			// Only lists local (non-Steam) and non-Core running mods, since such mods are presumably mutable and possibly in development.
+			var localNonCoreRunningMods = LoadedModManager.RunningMods.Where(mod => !ModLister.GetModWithIdentifier(mod.Identifier).OnSteamWorkshop && !mod.IsCoreMod);
+			Dialog_DebugOptionListLister.ShowSimpleDebugMenu(localNonCoreRunningMods, mod => mod.Name, DialogLanguageLister);
+
 		}
 
 		static void DialogLanguageLister(ModContentPack mod)
@@ -147,9 +145,7 @@ namespace TranslationFilesGenerator
 				languages.Remove(LanguageDatabase.activeLanguage);
 				languages.Insert(1, LanguageDatabase.activeLanguage);
 			}
-			var options = languages.Select(language => new DebugMenuOption(language.LanguageLabel(), DebugMenuOptionMode.Action,
-				() => TranslationFilesGenerator.Begin(mod, language)));
-			Find.WindowStack.Add(new Dialog_DebugOptionListLister(options));
+			Dialog_DebugOptionListLister.ShowSimpleDebugMenu(languages, language => language.LanguageLabel(), language => TranslationFilesGenerator.Begin(mod, language));
 		}
 	}
 
@@ -366,8 +362,9 @@ namespace TranslationFilesGenerator
 			{
 				targetLanguage.ResetDataAndErrors();
 				LanguageDatabase.activeLanguage = originalActiveLanguage;
-				originalActiveLanguage.InjectIntoData_AfterImpliedDefs();
 				Log.Message($"Reset language data for {targetLanguage} and change activeLanguage to {originalActiveLanguage}");
+				// Note: Reloading the original activeLanguage will be done in TranslationFilesGenerator.End after the arguments are reset,
+				// so that the changes in the LoadedLanguage HarmonyTranspiler patch are effectively reverted.
 			}
 		}
 	}
@@ -623,15 +620,15 @@ namespace TranslationFilesGenerator
 
 		static IEnumerable<ModContentPack> GetMods()
 		{
+			var mods = LoadedModManager.RunningMods;
 			if (TranslationFilesGenerator.Mode == TranslationFilesMode.GenerateForMod)
 			{
-				return new[]
-				{
-					LoadedModManager.GetMod<TranslationFilesGeneratorMod>().Content,
-					TranslationFilesGenerator.ModContentPack,
-				};
+				// Filter for only this TranslationFileGenerator mod and the target mod, while retaining order.
+				var translationFilesGeneratorMod = LoadedModManager.GetMod<TranslationFilesGeneratorMod>().Content;
+				mods = mods.Where(mod => mod == translationFilesGeneratorMod || mod == TranslationFilesGenerator.ModContentPack);
 			}
-			return LoadedModManager.RunningMods;
+			Log.Message($"LoadedLanguage_FolderPaths_Patch.GetMods:\n\t{mods.Join("\n\t")}");
+			return mods;
 		}
 	}
 
@@ -646,6 +643,10 @@ namespace TranslationFilesGenerator
 		{
 			var instructions = instructionEnumerable.DeoptimizeLocalVarInstructions(ilGenerator).AsList();
 			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(before):\n{instructions.ToDebugString()}");
+
+			// TEMP
+			instructions.Insert(instructions.FindIndex(OpCodes.Stloc_S.AsInstructionPredicate().LocalBuilder(2)),
+				new CodeInstruction(OpCodes.Call, typeof(TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch).GetMethod(nameof(DebugLog), AccessTools.all)));
 
 			// Need a DefInjectionPackage var for ModifyInjection.
 			// Initialize it to GetDefInjectionPackage(activeLanguage, defType).
@@ -737,6 +738,14 @@ namespace TranslationFilesGenerator
 
 			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(after):\n{instructions.ToDebugString()}");
 			return instructions.ReoptimizeLocalVarInstructions();
+		}
+
+		static List<KeyValuePair<string, DefInjectionPackage.DefInjection>> DebugLog(List<KeyValuePair<string, DefInjectionPackage.DefInjection>> existingNonPlaceholderInjections)
+		{
+			Log.Message("existingNonPlaceholderInjections:\n\t" + existingNonPlaceholderInjections.Select(pair => pair.Value).Select(injection =>
+				$"normalizedPath={injection.normalizedPath}, injected={injection.injected}, replacedString={injection.replacedString.ToStringSafe()}, " +
+				$"injection={injection.injection.ToStringSafe()}, fullListInjection={injection.fullListInjection.ToStringSafeEnumerable()}").Join("\n\t"));
+			return existingNonPlaceholderInjections;
 		}
 
 		static DefInjectionPackage GetDefInjectionPackage(LoadedLanguage language, Type defType)

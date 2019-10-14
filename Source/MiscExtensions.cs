@@ -68,7 +68,7 @@ namespace TranslationFilesGenerator
 
 		public static string Join<T>(this IEnumerable<T> enumerable, string delimiter = ", ")
 		{
-			return enumerable.Aggregate("", (string prev, T curr) => prev + ((prev != "") ? delimiter : "") + curr?.ToString() ?? "null");
+			return enumerable.Aggregate("", (string prev, T curr) => prev + (prev.Length != 0 ? delimiter : "") + curr?.ToString() ?? "null");
 		}
 
 		public static string LanguageLabel(this LoadedLanguage language)
@@ -78,7 +78,8 @@ namespace TranslationFilesGenerator
 			return $"{language.FriendlyNameNative} [{language.FriendlyNameEnglish}]";
 		}
 
-		// Tries to reset the target language to before its loaded state, including clearing any recorded errors.
+		// Tries to reset the given language to before its loaded state, including clearing any recorded errors.
+		// This doesn't reset loaded metadata (as referenced in LoadedLanguage.TryLoadMetadataFrom) or the Worker for the language.
 		public static void ResetDataAndErrors(this LoadedLanguage language)
 		{
 			typeof(LoadedLanguage).GetField("dataIsLoaded", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(language, false);
@@ -91,8 +92,20 @@ namespace TranslationFilesGenerator
 			language.anyError = false;
 			language.icon = BaseContent.BadTex;
 			language.keyedReplacements.Clear();
+			// Resetting each DefInjectionPackage shouldn't be necessary since the list of them is being cleared,
+			// but just in case if something still has a reference to it...
+			foreach (var defInjectionPackage in language.defInjections)
+			{
+				defInjectionPackage.injections.Clear();
+				defInjectionPackage.loadErrors.Clear();
+				defInjectionPackage.loadSyntaxSuggestions.Clear();
+				defInjectionPackage.usedOldRepSyntax = false;
+			}
 			language.defInjections.Clear();
 			language.stringFiles.Clear();
+			var wordInfo = (LanguageWordInfo)typeof(LoadedLanguage).GetField("wordInfo", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(language);
+			var genders = (Dictionary<string, Gender>)typeof(LanguageWordInfo).GetField("genders", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(wordInfo);
+			genders.Clear();
 		}
 	}
 }

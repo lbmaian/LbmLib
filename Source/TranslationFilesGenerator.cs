@@ -37,8 +37,6 @@ namespace TranslationFilesGenerator
 		public static void End()
 		{
 			Log.Message($"TranslationFilesGenerator.End: {ToString()}");
-			var targetLanguage = TargetLanguage;
-
 			// Resetting Instance has to be done separately in a DoCleanupTranslationFiles HarmonyPostfix patch (which calls this method),
 			// since TranslationFilesCleaner uses LongEventHandler for deferring execution.
 			Mode = TranslationFilesMode.Clean;
@@ -46,16 +44,15 @@ namespace TranslationFilesGenerator
 			TargetLanguage = null;
 			OriginalActiveLanguage = null;
 
-			// If the target language and original active language were the same, we need to reload the language data now that it's updated.
-			// This needs to be done AFTER the above arguments are reset, which effectively reverts the functional changes in the LoadedLanguage HarmonyTranspiler patch.
+			// TODO: This doesn't seem to working properly, since injected translations from other languages can appear in the old active language - investigate.
+			// We need to reload the language data now that it's either switched back to or updated.
+			// This needs to be done AFTER the above arguments are reset, so that the changes in the LoadedLanguage HarmonyTranspiler patch are effectively reverted.
 			var activeLanguage = LanguageDatabase.activeLanguage;
-			if (targetLanguage == activeLanguage)
-			{
-				// Not using LanguageDatabase.SelectLanguage, since it's really slow.
-				activeLanguage.ResetDataAndErrors();
-				activeLanguage.InjectIntoData_AfterImpliedDefs();
-				Log.Message($"Reset language data for {targetLanguage}");
-			}
+			// Not using LanguageDatabase.SelectLanguage, since it's really slow.
+			// TODO: Reload target mod defs. But this isn't simple due to XML inheritance and patching logic.
+			activeLanguage.ResetDataAndErrors();
+			activeLanguage.InjectIntoData_AfterImpliedDefs();
+			Log.Message($"Reset language data for {activeLanguage}");
 		}
 
 		public static new string ToString()
