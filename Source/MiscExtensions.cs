@@ -50,7 +50,8 @@ namespace TranslationFilesGenerator
 			return list;
 		}
 
-		public static int RemoveAll<K, V>(this Dictionary<K, V> dictionary, Predicate<K> keyPredicate = null, Predicate<V> valuePredicate = null, Predicate<KeyValuePair<K, V>> pairPredicate = null)
+		public static int RemoveAll<K, V>(this Dictionary<K, V> dictionary, Func<K, bool> keyPredicate = null, Func<V, bool> valuePredicate = null,
+			Func<KeyValuePair<K, V>, bool> pairPredicate = null)
 		{
 			int removeCount = 0;
 			if (keyPredicate != null)
@@ -96,7 +97,7 @@ namespace TranslationFilesGenerator
 			var listCount = list.Count;
 			if (index > listCount - count)
 				throw new ArgumentOutOfRangeException($"startIndex ({index}) + count ({count}) cannot be > list.Count ({listCount})");
-			List<T> range = new List<T>(count);
+			var range = new List<T>(count);
 			var endIndexExcl = index + count;
 			while (index < endIndexExcl)
 			{
@@ -164,7 +165,7 @@ namespace TranslationFilesGenerator
 			}
 		}
 
-		static Predicate<T> EqualsPredicate<T>(T item)
+		static Func<T, bool> EqualsPredicate<T>(T item)
 		{
 			var equalityComparer = EqualityComparer<T>.Default;
 			return x => equalityComparer.Equals(x, item);
@@ -206,7 +207,7 @@ namespace TranslationFilesGenerator
 			if (list is List<T> actualList)
 				return actualList.LastIndexOf(item);
 			var listCount = list.Count;
-			return FindIndexInternal(list, listCount - 1, listCount, EqualsPredicate(item));
+			return FindLastIndexInternal(list, listCount - 1, listCount, EqualsPredicate(item));
 		}
 
 		public static int LastIndexOf<T>(this IList<T> list, T item, int index)
@@ -233,38 +234,38 @@ namespace TranslationFilesGenerator
 			return FindLastIndexInternal(list, index, count, EqualsPredicate(item));
 		}
 
-		public static T Find<T>(this IList<T> list, Predicate<T> match)
+		public static T Find<T>(this IList<T> list, Func<T, bool> match)
 		{
 			if (list is List<T> actualList)
-				return actualList.Find(match);
+				return actualList.Find(new Predicate<T>(match));
 			var index = list.FindIndex(match);
 			return index != -1 ? list[index] : default;
 		}
 
-		public static T Find<T>(this IList<T> list, int startIndex, Predicate<T> match)
+		public static T Find<T>(this IList<T> list, int startIndex, Func<T, bool> match)
 		{
 			var index = list.FindIndex(startIndex, match);
 			return index != -1 ? list[index] : default;
 		}
 
-		public static T Find<T>(this IList<T> list, int startIndex, int count, Predicate<T> match)
+		public static T Find<T>(this IList<T> list, int startIndex, int count, Func<T, bool> match)
 		{
 			var index = list.FindIndex(startIndex, count, match);
 			return index != -1 ? list[index] : default;
 		}
 
-		public static int FindIndex<T>(this IList<T> list, Predicate<T> match)
+		public static int FindIndex<T>(this IList<T> list, Func<T, bool> match)
 		{
 			if (list is List<T> actualList)
-				return actualList.FindIndex(match);
+				return actualList.FindIndex(new Predicate<T>(match));
 			// Following is based off MS .NET Framework reference implementation.
 			return FindIndexInternal(list, 0, list.Count, match);
 		}
 
-		public static int FindIndex<T>(this IList<T> list, int startIndex, Predicate<T> match)
+		public static int FindIndex<T>(this IList<T> list, int startIndex, Func<T, bool> match)
 		{
 			if (list is List<T> actualList)
-				return actualList.FindIndex(startIndex, match);
+				return actualList.FindIndex(startIndex, new Predicate<T>(match));
 			// Following is based off MS .NET Framework reference implementation.
 			var listCount = list.Count;
 			if (startIndex > listCount)
@@ -272,10 +273,10 @@ namespace TranslationFilesGenerator
 			return FindIndexInternal(list, startIndex, listCount - startIndex, match);
 		}
 
-		public static int FindIndex<T>(this IList<T> list, int startIndex, int count, Predicate<T> match)
+		public static int FindIndex<T>(this IList<T> list, int startIndex, int count, Func<T, bool> match)
 		{
 			if (list is List<T> actualList)
-				return actualList.FindIndex(startIndex, count, match);
+				return actualList.FindIndex(startIndex, count, new Predicate<T>(match));
 			// Following is based off MS .NET Framework reference implementation.
 			var listCount = list.Count;
 			if ((uint)startIndex > (uint)listCount)
@@ -287,7 +288,7 @@ namespace TranslationFilesGenerator
 			return FindIndexInternal(list, startIndex, count, match);
 		}
 
-		static int FindIndexInternal<T>(IList<T> list, int startIndex, int count, Predicate<T> match)
+		static int FindIndexInternal<T>(IList<T> list, int startIndex, int count, Func<T, bool> match)
 		{
 			if (match == null)
 				throw new ArgumentNullException(nameof(match));
@@ -300,17 +301,17 @@ namespace TranslationFilesGenerator
 			return -1;
 		}
 
-		public static int FindIndex<T>(this IList<T> list, params Predicate<T>[] sequenceMatches)
+		public static int FindIndex<T>(this IList<T> list, params Func<T, bool>[] sequenceMatches)
 		{
 			return list.FindIndex(0, list.Count, sequenceMatches);
 		}
 
-		public static int FindIndex<T>(this IList<T> list, int startIndex, params Predicate<T>[] sequenceMatches)
+		public static int FindIndex<T>(this IList<T> list, int startIndex, params Func<T, bool>[] sequenceMatches)
 		{
 			return list.FindIndex(startIndex, list.Count - startIndex, sequenceMatches);
 		}
 
-		public static int FindIndex<T>(this IList<T> list, int startIndex, int count, params Predicate<T>[] sequenceMatches)
+		public static int FindIndex<T>(this IList<T> list, int startIndex, int count, params Func<T, bool>[] sequenceMatches)
 		{
 			if (sequenceMatches == null)
 				throw new ArgumentNullException(nameof(sequenceMatches));
@@ -340,48 +341,48 @@ namespace TranslationFilesGenerator
 			return index;
 		}
 
-		public static T FindLast<T>(this IList<T> list, Predicate<T> match)
+		public static T FindLast<T>(this IList<T> list, Func<T, bool> match)
 		{
 			if (list is List<T> actualList)
-				return actualList.FindLast(match);
+				return actualList.FindLast(new Predicate<T>(match));
 			var index = list.FindLastIndex(match);
 			return index != -1 ? list[index] : default;
 		}
 
-		public static T FindLast<T>(this IList<T> list, int startIndex, Predicate<T> match)
+		public static T FindLast<T>(this IList<T> list, int startIndex, Func<T, bool> match)
 		{
 			var index = list.FindLastIndex(startIndex, match);
 			return index != -1 ? list[index] : default;
 		}
 
-		public static T FindLast<T>(this IList<T> list, int startIndex, int count, Predicate<T> match)
+		public static T FindLast<T>(this IList<T> list, int startIndex, int count, Func<T, bool> match)
 		{
 			var index = list.FindLastIndex(startIndex, count, match);
 			return index != -1 ? list[index] : default;
 		}
 
-		public static int FindLastIndex<T>(this IList<T> list, Predicate<T> match)
+		public static int FindLastIndex<T>(this IList<T> list, Func<T, bool> match)
 		{
 			if (list is List<T> actualList)
-				return actualList.FindLastIndex(match);
+				return actualList.FindLastIndex(new Predicate<T>(match));
 			var listCount = list.Count;
 			return FindLastIndexInternal(list, listCount - 1, listCount, match);
 		}
 
-		public static int FindLastIndex<T>(this IList<T> list, int startIndex, Predicate<T> match)
+		public static int FindLastIndex<T>(this IList<T> list, int startIndex, Func<T, bool> match)
 		{
 			if (list is List<T> actualList)
-				return actualList.FindLastIndex(startIndex, match);
+				return actualList.FindLastIndex(startIndex, new Predicate<T>(match));
 			var listCount = list.Count;
 			if ((listCount == 0 && startIndex != -1) || (uint)startIndex >= (uint)listCount)
 				throw new ArgumentOutOfRangeException($"startIndex ({startIndex}) cannot be >= list.Count ({listCount})");
 			return FindLastIndexInternal(list, startIndex, startIndex + 1, match);
 		}
 
-		public static int FindLastIndex<T>(this IList<T> list, int startIndex, int count, Predicate<T> match)
+		public static int FindLastIndex<T>(this IList<T> list, int startIndex, int count, Func<T, bool> match)
 		{
 			if (list is List<T> actualList)
-				return actualList.FindLastIndex(startIndex, count, match);
+				return actualList.FindLastIndex(startIndex, count, new Predicate<T>(match));
 			// Following is based off MS .NET Framework reference implementation.
 			var listCount = list.Count;
 			if ((listCount == 0 && startIndex != -1) || (uint)startIndex >= (uint)listCount)
@@ -393,7 +394,7 @@ namespace TranslationFilesGenerator
 			return FindLastIndexInternal(list, startIndex, count, match);
 		}
 
-		static int FindLastIndexInternal<T>(IList<T> list, int startIndex, int count, Predicate<T> match)
+		static int FindLastIndexInternal<T>(IList<T> list, int startIndex, int count, Func<T, bool> match)
 		{
 			if (match == null)
 				throw new ArgumentNullException(nameof(match));
@@ -406,18 +407,18 @@ namespace TranslationFilesGenerator
 			return -1;
 		}
 
-		public static int FindLastIndex<T>(this IList<T> list, params Predicate<T>[] sequenceMatches)
+		public static int FindLastIndex<T>(this IList<T> list, params Func<T, bool>[] sequenceMatches)
 		{
 			var listCount = list.Count;
 			return list.FindLastIndex(listCount - 1, listCount, sequenceMatches);
 		}
 
-		public static int FindLastIndex<T>(this IList<T> list, int startIndex, params Predicate<T>[] sequenceMatches)
+		public static int FindLastIndex<T>(this IList<T> list, int startIndex, params Func<T, bool>[] sequenceMatches)
 		{
 			return list.FindLastIndex(startIndex, startIndex + 1, sequenceMatches);
 		}
 
-		public static int FindLastIndex<T>(this IList<T> list, int startIndex, int count, params Predicate<T>[] sequenceMatches)
+		public static int FindLastIndex<T>(this IList<T> list, int startIndex, int count, params Func<T, bool>[] sequenceMatches)
 		{
 			if (sequenceMatches == null)
 				throw new ArgumentNullException(nameof(sequenceMatches));
@@ -449,17 +450,17 @@ namespace TranslationFilesGenerator
 			return index;
 		}
 
-		public static Predicate<T> Negation<T>(this Predicate<T> predicate)
+		public static Func<T, bool> Negation<T>(this Func<T, bool> predicate)
 		{
 			return x => !predicate(x);
 		}
 
-		public static Predicate<T> And<T>(this Predicate<T> predicate1, Predicate<T> predicate2)
+		public static Func<T, bool> And<T>(this Func<T, bool> predicate1, Func<T, bool> predicate2)
 		{
 			return x => predicate1(x) && predicate2(x);
 		}
 
-		public static Predicate<T> Or<T>(this Predicate<T> predicate1, Predicate<T> predicate2)
+		public static Func<T, bool> Or<T>(this Func<T, bool> predicate1, Func<T, bool> predicate2)
 		{
 			return x => predicate1(x) || predicate2(x);
 		}

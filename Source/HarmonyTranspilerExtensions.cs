@@ -29,14 +29,14 @@ namespace TranslationFilesGenerator
 			return str;
 		}
 
-		public static string ItemToDebugString(this List<CodeInstruction> instructions, int index, string label = "")
+		public static string ItemToDebugString(this IList<CodeInstruction> instructions, int index, string label = "")
 		{
 			if (index < 0 || index >= instructions.Count)
 				throw new ArgumentOutOfRangeException($"{label}{index}: <out of range [0..{instructions.Count - 1}]>");
 			return $"{label}{index}: {instructions[index].ToDebugString()}";
 		}
 
-		public static string RangeToDebugString(this List<CodeInstruction> instructions, int startIndex, int count, string label = "", string delimiter = "\n\t")
+		public static string RangeToDebugString(this IList<CodeInstruction> instructions, int startIndex, int count, string label = "", string delimiter = "\n\t")
 		{
 			var sb = new StringBuilder(label);
 			for (int index = startIndex; index < startIndex + count; index++)
@@ -48,17 +48,19 @@ namespace TranslationFilesGenerator
 			return sb.ToString();
 		}
 
-		public static string ToDebugString(this List<CodeInstruction> instructions, string label = "", string delimiter = "\n\t")
+		public static string ToDebugString(this IList<CodeInstruction> instructions, string label = "", string delimiter = "\n\t")
 		{
 			return instructions.RangeToDebugString(0, instructions.Count, label, delimiter);
 		}
 
-		public static List<CodeInstruction> CloneRange(this List<CodeInstruction> instructions, int index, int count)
+		public static List<CodeInstruction> CloneRange(this IList<CodeInstruction> instructions, int index, int count)
 		{
 			var clonedInstructions = new List<CodeInstruction>(instructions.Count);
-			for (int i = 0; i < count; i++)
+			var endIndexExcl = index + count;
+			while (index < endIndexExcl)
 			{
-				clonedInstructions.Add(instructions[index + i].Clone());
+				clonedInstructions.Add(instructions[index].Clone());
+				index++;
 			}
 			return clonedInstructions;
 		}
@@ -171,13 +173,13 @@ namespace TranslationFilesGenerator
 			return instructions;
 		}
 
-		public static void AddTryFinally(this List<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
+		public static void AddTryFinally(this IList<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
 			IList<CodeInstruction> finallyInstructions)
 		{
 			AddTryFinally(methodInstructions, method, ilGenerator, 0, methodInstructions.Count - 1, finallyInstructions);
 		}
 
-		public static void AddTryFinally(this List<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
+		public static void AddTryFinally(this IList<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
 			int tryStartIndex, int finallyInsertIndex, IList<CodeInstruction> finallyBlockInstructions)
 		{
 			if (tryStartIndex >= finallyInsertIndex)
@@ -400,7 +402,7 @@ namespace TranslationFilesGenerator
 			}
 		}
 
-		static void ConvertToLeaveInstructions(List<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
+		static void ConvertToLeaveInstructions(IList<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
 			int tryStartIndex, ref int finallyInsertIndex, OpCode opcodeToConvert, bool allowReturnValueTracking)
 		{
 			// Note: Replace all "ret" in the following comments with "opcodeToConvert", as this is also used to convert "jmp" instructions.
@@ -408,7 +410,7 @@ namespace TranslationFilesGenerator
 			// (and thus also after the finally instructions) with additional return value tracking if method has return type.
 			// Note: If the try block range is the whole method, then either the method contains at least one ret instruction or it only has throw instructions.
 			// In the latter case, there doesn't even need to be anything after the finally instructions.
-			var equalsOpcodeToConvertPredicate = new Predicate<CodeInstruction>(instruction => instruction.opcode.EqualsIgnoreForm(opcodeToConvert));
+			var equalsOpcodeToConvertPredicate = new Func<CodeInstruction, bool>(instruction => instruction.opcode.EqualsIgnoreForm(opcodeToConvert));
 			var instructionCount = methodInstructions.Count;
 			var searchIndex = tryStartIndex;
 			var count = finallyInsertIndex - tryStartIndex;
@@ -512,38 +514,38 @@ namespace TranslationFilesGenerator
 
 	public static class CodeInstructionPredicateExtensions
 	{
-		public static Predicate<CodeInstruction> AsInstructionPredicate(this OpCode opcode)
+		public static Func<CodeInstruction, bool> AsInstructionPredicate(this OpCode opcode)
 		{
 			return instruction => instruction.opcode == opcode;
 		}
 
 		// Functionally equivalent to: opcode.AsInstructionPredicate().Operand(operand)
-		public static Predicate<CodeInstruction> AsInstructionPredicate(this OpCode opcode, object operand)
+		public static Func<CodeInstruction, bool> AsInstructionPredicate(this OpCode opcode, object operand)
 		{
 			return instruction => instruction.opcode == opcode && instruction.operand == operand;
 		}
 
-		public static Predicate<CodeInstruction> Operand(this Predicate<CodeInstruction> instructionPredicate, object operand)
+		public static Func<CodeInstruction, bool> Operand(this Func<CodeInstruction, bool> instructionPredicate, object operand)
 		{
 			return instruction => instructionPredicate(instruction) && instruction.operand == operand;
 		}
 
-		public static Predicate<CodeInstruction> Operand<T>(this Predicate<CodeInstruction> instructionPredicate, Predicate<T> operandPredicate) where T : class
+		public static Func<CodeInstruction, bool> Operand<T>(this Func<CodeInstruction, bool> instructionPredicate, Func<T, bool> operandPredicate) where T : class
 		{
 			return instruction => instructionPredicate(instruction) && instruction.operand is T typedOperand && operandPredicate(typedOperand);
 		}
 
-		public static Predicate<CodeInstruction> LocalBuilder(this Predicate<CodeInstruction> instructionPredicate, Predicate<LocalBuilder> operandPredicate)
+		public static Func<CodeInstruction, bool> LocalBuilder(this Func<CodeInstruction, bool> instructionPredicate, Func<LocalBuilder, bool> operandPredicate)
 		{
 			return instructionPredicate.Operand(operandPredicate);
 		}
 
-		public static Predicate<CodeInstruction> LocalBuilder(this Predicate<CodeInstruction> instructionPredicate, int localIndex)
+		public static Func<CodeInstruction, bool> LocalBuilder(this Func<CodeInstruction, bool> instructionPredicate, int localIndex)
 		{
 			return instructionPredicate.LocalBuilder(localBuilder => localBuilder.LocalIndex == localIndex);
 		}
 
-		public static Predicate<CodeInstruction> LocalBuilder(this Predicate<CodeInstruction> instructionPredicate, Type localBuilderType, bool useIsAssignableFrom = false)
+		public static Func<CodeInstruction, bool> LocalBuilder(this Func<CodeInstruction, bool> instructionPredicate, Type localBuilderType, bool useIsAssignableFrom = false)
 		{
 			if (useIsAssignableFrom)
 				return instructionPredicate.LocalBuilder(localBuilder => localBuilderType.IsAssignableFrom(localBuilder.LocalType));
@@ -551,33 +553,33 @@ namespace TranslationFilesGenerator
 				return instructionPredicate.LocalBuilder(localBuilder => localBuilderType == localBuilder.LocalType);
 		}
 
-		public static Predicate<CodeInstruction> AsInstructionPredicate(this Label label)
+		public static Func<CodeInstruction, bool> AsInstructionPredicate(this Label label)
 		{
 			return instruction => instruction.labels.Contains(label);
 		}
 
-		public static Predicate<CodeInstruction> HasLabel(this Predicate<CodeInstruction> instructionPredicate, Label label)
+		public static Func<CodeInstruction, bool> HasLabel(this Func<CodeInstruction, bool> instructionPredicate, Label label)
 		{
 			return instruction => instructionPredicate(instruction) && instruction.labels.Contains(label);
 		}
 
-		public static Predicate<CodeInstruction> HasLabel(this Predicate<CodeInstruction> instructionPredicate, List<Label> labels)
+		public static Func<CodeInstruction, bool> HasLabel(this Func<CodeInstruction, bool> instructionPredicate, IEnumerable<Label> labels)
 		{
 			return instruction => instructionPredicate(instruction) && labels.Any(label => instruction.labels.Contains(label));
 		}
 
 
-		public static Predicate<CodeInstruction> AsInstructionPredicate(this ExceptionBlockType blockType)
+		public static Func<CodeInstruction, bool> AsInstructionPredicate(this ExceptionBlockType blockType)
 		{
 			return instruction => instruction.blocks.Any(block => block.blockType == blockType);
 		}
 
-		public static Predicate<CodeInstruction> HasBlock(this Predicate<CodeInstruction> instructionPredicate, ExceptionBlockType blockType)
+		public static Func<CodeInstruction, bool> HasBlock(this Func<CodeInstruction, bool> instructionPredicate, ExceptionBlockType blockType)
 		{
 			return instruction => instructionPredicate(instruction) && instruction.blocks.Any(block => block.blockType == blockType);
 		}
 
-		public static Predicate<CodeInstruction> HasBlock(this Predicate<CodeInstruction> instructionPredicate, Type catchType)
+		public static Func<CodeInstruction, bool> HasBlock(this Func<CodeInstruction, bool> instructionPredicate, Type catchType)
 		{
 			return instruction => instructionPredicate(instruction) && instruction.blocks.Any(block => block.catchType == catchType);
 		}
