@@ -33,7 +33,7 @@ namespace TranslationFilesGenerator.Tools
 			return obj;
 		}
 
-		static Dictionary<Type, string> providerTypeOutputCache = new Dictionary<Type, string>();
+		static readonly Dictionary<Type, string> ProviderTypeOutputCache = new Dictionary<Type, string>();
 
 		public static string ToDebugString(this Type type)
 		{
@@ -48,13 +48,13 @@ namespace TranslationFilesGenerator.Tools
 			}
 			if (type.IsPrimitive || type.IsArray)
 			{
-				if (!providerTypeOutputCache.TryGetValue(type, out string str))
+				if (!ProviderTypeOutputCache.TryGetValue(type, out string str))
 				{
 					using (var provider = new CSharpCodeProvider())
 						str = provider.GetTypeOutput(new CodeTypeReference(type));
 					if (type.IsArray)
 						str = type.GetElementType().ToDebugString() + str.Substring(str.IndexOf('['));
-					providerTypeOutputCache.Add(type, str);
+					ProviderTypeOutputCache.Add(type, str);
 				}
 				return str;
 			}
