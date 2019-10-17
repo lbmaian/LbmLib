@@ -1,5 +1,5 @@
-Source/obj
-Source/packages
+Source/**/obj
+Source/**/packages
 .vs
 .vscode
 *.csproj.user
