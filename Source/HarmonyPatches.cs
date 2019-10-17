@@ -664,11 +664,10 @@ namespace TranslationFilesGenerator
 			var xDocumentVarStoreIndex = instructions.FindIndex(defInjectionVarInitInstructions.Length + 1, OpCodes.Stloc_S.AsInstructionPredicate().LocalBuilder(typeof(XDocument)));
 			//Log.Message(instructions.ItemToDebugString(xDocumentVarStoreIndex, "xDocumentVarStoreIndex="));
 			var fileNameFieldStoreIndex = instructions.FindLastIndex(xDocumentVarStoreIndex - 1,
-				OpCodes.Stfld.AsInstructionPredicate().FieldInfo(fieldType: typeof(string), fieldName: "fileName"));
+				OpCodes.Stfld.AsInstructionPredicate().Operand<FieldInfo>(field => field.FieldType == typeof(string) && field.Name == "fileName"));
 			//Log.Message(instructions.ItemToDebugString(fileNameFieldStoreIndex, "fileNameFieldStoreIndex="));
 			var fileNameHolderLoadIndex = instructions.FindLastIndex(fileNameFieldStoreIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate().LocalBuilder(localVar =>
-				localVar.LocalType.GetField("fileName", AccessTools.all) is FieldInfo field &&
-				field.FieldType == typeof(string)));
+				localVar.LocalType.GetField("fileName", AccessTools.all) is FieldInfo field && field.FieldType == typeof(string)));
 			//Log.Message(instructions.ItemToDebugString(fileNameHolderLoadIndex, "fileNameHolderLoadIndex="));
 
 			// Initialize translationFile var to new FileInfo(Path.Combine(Path.Combine(defInjectionsFolderPath, GenTypes.GetTypeNameWithoutIgnoredNamespaces(defType)), fileName)).
@@ -813,7 +812,7 @@ namespace TranslationFilesGenerator
 					newInstructions.AddRange(new[]
 					{
 						instructions[englishListVarLoadIndex].Clone(),
-						new CodeInstruction(OpCodes.Call, typeof(MiscExtensions).GetMethod(nameof(MiscExtensions.AsList), AccessTools.all).MakeGenericMethod(typeof(string))),
+						new CodeInstruction(OpCodes.Call, typeof(LangExtensions).GetMethod(nameof(LangExtensions.AsList), AccessTools.all).MakeGenericMethod(typeof(string))),
 						new CodeInstruction(OpCodes.Ldnull), // comments
 						new CodeInstruction(OpCodes.Call, typeof(DefInjectionPackage).GetMethod("TryAddFullListInjection", AccessTools.all)),
 					});
