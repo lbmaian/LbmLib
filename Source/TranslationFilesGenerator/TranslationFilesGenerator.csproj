@@ -73,11 +73,11 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="DebugExtensions.cs" />
+    <Compile Include="Tools\DebugExtensions.cs" />
     <Compile Include="HarmonyPatches.cs" />
-    <Compile Include="HarmonyTranspilerExtensions.cs" />
+    <Compile Include="Tools\HarmonyTranspilerExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="MiscExtensions.cs" />
+    <Compile Include="Tools\LanguageExtensions.cs" />
     <Compile Include="TranslationFilesGenerator.cs" />
     <Compile Include="TranslationFilesGeneratorMod.cs" />
   </ItemGroup>

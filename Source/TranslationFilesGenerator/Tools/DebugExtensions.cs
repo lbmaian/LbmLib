@@ -7,7 +7,7 @@ using Microsoft.CSharp;
 using UnityEngine;
 using Verse;
 
-namespace TranslationFilesGenerator
+namespace TranslationFilesGenerator.Tools
 {
 	public static class DebugExtensions
 	{

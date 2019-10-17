@@ -7,7 +7,7 @@ using System.Text;
 using Harmony;
 using Harmony.ILCopying;
 
-namespace TranslationFilesGenerator
+namespace TranslationFilesGenerator.Tools
 {
 	public static class HarmonyTranspilerExtensions
 	{

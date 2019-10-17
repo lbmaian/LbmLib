@@ -4,9 +4,9 @@ using System.Linq;
 using System.Reflection;
 using Verse;
 
-namespace TranslationFilesGenerator
+namespace TranslationFilesGenerator.Tools
 {
-	public static class LangExtensions
+	public static class LanguageExtensions
 	{
 		public static List<T> AsList<T>(this IEnumerable<T> enumerable)
 		{
