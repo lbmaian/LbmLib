@@ -95,7 +95,7 @@ namespace TranslationFilesGenerator.Tools
 			if (sequenceMatches.Length == 0)
 				throw new ArgumentException($"sequenceMatches must not be empty");
 			if (count - sequenceMatches.Length < 0)
-				throw new ArgumentOutOfRangeException($"count ({count}) - sequenceMatches.Length ({sequenceMatches.Length}) cannot be < 0");
+				return -1;
 			count -= sequenceMatches.Length - 1;
 			var index = list.FindIndex(startIndex, count, sequenceMatches[0]);
 			while (index != -1)
@@ -136,7 +136,7 @@ namespace TranslationFilesGenerator.Tools
 			if (sequenceMatches.Length == 0)
 				throw new ArgumentException($"sequenceMatches must not be empty");
 			if (count - sequenceMatches.Length < 0)
-				throw new ArgumentOutOfRangeException($"count ({count}) - sequenceMatches.Length ({sequenceMatches.Length}) cannot be < 0");
+				return -1;
 			var maxSequenceMatchIndex = sequenceMatches.Length - 1;
 			startIndex -= maxSequenceMatchIndex;
 			count -= maxSequenceMatchIndex;

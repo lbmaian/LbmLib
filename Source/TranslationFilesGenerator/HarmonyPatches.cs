@@ -641,9 +641,9 @@ namespace TranslationFilesGenerator
 		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
 
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, ILGenerator ilGenerator)
+		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, MethodBase method, ILGenerator ilGenerator)
 		{
-			var instructions = instructionEnumerable.DeoptimizeLocalVarInstructions(ilGenerator).AsList();
+			var instructions = instructionEnumerable.DeoptimizeLocalVarInstructions(method, ilGenerator).AsList();
 			//Log.Message($"TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(before):\n{instructions.ToDebugString()}");
 
 			// Need a DefInjectionPackage var for ModifyInjection.

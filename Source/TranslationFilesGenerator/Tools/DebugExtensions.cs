@@ -11,26 +11,49 @@ namespace TranslationFilesGenerator.Tools
 {
 	public static class DebugExtensions
 	{
-		public static T Logged<T>(this T obj)
+		// TODO: Move logging stuff into own Logger class?
+		public static Action<string> DefaultLogger = str => Log.Message(str);
+
+		public static T Logged<T>(this T obj, Action<string> logger = null)
 		{
-			return obj.LabelLogged("");
+			return obj.LabelLogged("", logger);
 		}
 
-		public static T LabelLogged<T>(this T obj, string label)
+		public static T LabelLogged<T>(this T obj, string label, Action<string> logger = null)
 		{
-			Log.Message(label + (obj is string str ? str : obj is System.Collections.IEnumerable enumerable ? enumerable.ToStringSafeEnumerable() : obj.ToStringSafe()));
+			(logger ?? DefaultLogger)(label + (obj is string str ? str :
+				obj is System.Collections.IEnumerable enumerable ? enumerable.ToStringSafeEnumerable() : obj.ToStringSafe()));
 			return obj;
+		}
+
+		public static T MessageLogged<T>(this T obj)
+		{
+			return obj.Logged(str => Log.Message(str));
+		}
+
+		public static T LabelMessageLogged<T>(this T obj, string label)
+		{
+			return obj.LabelLogged(label, str => Log.Message(str));
 		}
 
 		public static T DebugLogged<T>(this T obj)
 		{
-			return obj.LabelDebugLogged("");
+			return obj.Logged(str => Debug.Log(str));
 		}
 
 		public static T LabelDebugLogged<T>(this T obj, string label)
 		{
-			Debug.Log(label + (obj is string str ? str : obj is System.Collections.IEnumerable enumerable ? enumerable.ToStringSafeEnumerable() : obj.ToStringSafe()));
-			return obj;
+			return obj.LabelLogged(label, str => Debug.Log(str));
+		}
+
+		public static T ConsoleLogged<T>(this T obj)
+		{
+			return obj.Logged(str => Console.WriteLine(str));
+		}
+
+		public static T LabelConsoleLogged<T>(this T obj, string label)
+		{
+			return obj.LabelLogged(label, str => Console.WriteLine(str));
 		}
 
 		static readonly Dictionary<Type, string> ProviderTypeOutputCache = new Dictionary<Type, string>();

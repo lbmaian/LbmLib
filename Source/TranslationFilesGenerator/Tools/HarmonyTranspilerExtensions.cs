@@ -11,23 +11,37 @@ namespace TranslationFilesGenerator.Tools
 {
 	public static class HarmonyTranspilerExtensions
 	{
+		// Certain CodeInstruction operands aren't being formatted well in CodeInstruction.ToString, so provide a better version.
 		public static string ToDebugString(this CodeInstruction instruction)
 		{
-			// Certain operands aren't being special-cased in CodeInstruction.ToString, so replace them with better ToString's.
-			// Or in the case of LocalBuilder, replaced it's ToString of the its LocalType with a better ToString.
-			var str = instruction.ToString();
-			if (instruction.operand is Type type)
-				str = str.Replace(type.ToString(), type.ToDebugString());
-			else if (instruction.operand is FieldInfo field)
-				str = str.Replace(field.ToString(), field.ToDebugString());
-			else if (instruction.operand is MethodBase method)
-				str = str.Replace(method.ToString(), method.ToDebugString());
-			else if (instruction.operand is LocalBuilder localBuilder)
-				str = str.Replace(localBuilder.LocalType.ToString(), localBuilder.LocalType.ToDebugString());
-			else if (instruction.operand is null && instruction.opcode.OperandType == OperandType.InlineNone)
-				str = str.Replace(" NULL", "");
-			return str;
+			var operandStr = OperandToDebugString(instruction.operand, instruction.opcode);
+			if (operandStr.Length != 0)
+				operandStr = " " + operandStr;
+			var extrasStr = Enumerable.Concat(instruction.labels.Select(label => label.ToDebugString()), instruction.blocks.Select(block => block.ToDebugString())).Join();
+			if (extrasStr.Length != 0)
+				extrasStr = " [" + extrasStr + "]";
+			return instruction.opcode.ToString() + operandStr + extrasStr;
 		}
+
+		static string OperandToDebugString(object operand, OpCode opcode)
+		{
+			if (operand is Type type)
+				return type.ToDebugString();
+			else if (operand is FieldInfo field)
+				return field.ToDebugString();
+			else if (operand is MethodBase method)
+				return method.ToDebugString();
+			else if (operand is LocalBuilder localBuilder)
+				return localBuilder.LocalIndex + " (" + localBuilder.LocalType.ToDebugString() + ")";
+			else if (operand is null && opcode.OperandType == OperandType.InlineNone)
+				return "";
+			else
+				return Emitter.FormatArgument(operand);
+		}
+
+		public static string ToDebugString(this Label label) => "Label" + label.GetHashCode();
+
+		public static string ToDebugString(this ExceptionBlock block) => "EX_" + block.blockType.ToString().Replace("Block", "");
 
 		public static string ItemToDebugString(this IList<CodeInstruction> instructions, int index, string label = "")
 		{
@@ -82,9 +96,9 @@ namespace TranslationFilesGenerator.Tools
 		// This allows searching instructions for any local variable access via ldloc.s/stloc.s (assuming there's no ldloc/stloc, which is usually a safe assumption).
 		// Ensure that ReoptimizeLocalVarInstructions is called afterwards to reverts ldloc.s/stloc.s instructions back to ldloc.<num>/stloc.<num> instructions.
 		// Returns the passed (and changed) instructions for convenience.
-		public static IEnumerable<CodeInstruction> DeoptimizeLocalVarInstructions(this IEnumerable<CodeInstruction> instructions, ILGenerator ilGenerator)
+		public static IEnumerable<CodeInstruction> DeoptimizeLocalVarInstructions(this IEnumerable<CodeInstruction> instructions, MethodBase method, ILGenerator ilGenerator)
 		{
-			LocalBuilder[] localBuilders;
+			var localBuilders = default(LocalBuilder[]);
 			// Mono .NET mscorlib implementation of ILGenerator has a LocalBuilder[] field we can use.
 			if (ilGenerator.GetType().GetFields(AccessTools.all).Where(field => field.FieldType == typeof(LocalBuilder[])).FirstOrDefault() is FieldInfo localBuildersField)
 			{
@@ -96,10 +110,6 @@ namespace TranslationFilesGenerator.Tools
 				var localBuilderConstructor = typeof(LocalBuilder).GetConstructor(AccessTools.all, null, new[] { typeof(int), typeof(Type), typeof(MethodInfo), typeof(bool) }, null);
 				if (localBuilderConstructor == null)
 					throw new InvalidOperationException("Could find neither existing LocalBuilder's on ILGenerator nor an expected LocalBuilder constructor");
-				var methodInfoField = ilGenerator.GetType().GetFields(AccessTools.all).Where(field => typeof(MethodInfo).IsAssignableFrom(field.FieldType)).FirstOrDefault();
-				if (methodInfoField == null)
-					throw new InvalidOperationException("Could find neither existing LocalBuilder's nor MethodInfo on ILGenerator");
-				var method = (MethodInfo)methodInfoField.GetValue(ilGenerator);
 				var localVars = method.GetMethodBody().LocalVariables;
 				localBuilders = new LocalBuilder[Math.Min(4, localVars.Count)];
 				for (var localVarIndex = 0; localVarIndex < localBuilders.Length; localVarIndex++)
@@ -176,7 +186,7 @@ namespace TranslationFilesGenerator.Tools
 		public static void AddTryFinally(this IList<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
 			IList<CodeInstruction> finallyInstructions)
 		{
-			AddTryFinally(methodInstructions, method, ilGenerator, 0, methodInstructions.Count - 1, finallyInstructions);
+			AddTryFinally(methodInstructions, method, ilGenerator, 0, methodInstructions.Count, finallyInstructions);
 		}
 
 		public static void AddTryFinally(this IList<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
@@ -189,8 +199,8 @@ namespace TranslationFilesGenerator.Tools
 			if (tryStartIndex < 0)
 				throw new ArgumentOutOfRangeException($"tryStartIndex ({tryStartIndex}) cannot be < 0");
 			var instructionCount = methodInstructions.Count;
-			if (finallyInsertIndex >= instructionCount)
-				throw new ArgumentOutOfRangeException($"finallyInsertIndex ({finallyInsertIndex}) cannot be >= methodInstructions.Count ({instructionCount})");
+			if (finallyInsertIndex > instructionCount)
+				throw new ArgumentOutOfRangeException($"finallyInsertIndex ({finallyInsertIndex}) cannot be > methodInstructions.Count ({instructionCount})");
 
 			var labelsWithinTryBlock = new HashSet<Label>();
 			for (var index = tryStartIndex; index < finallyInsertIndex; index++)
@@ -207,11 +217,12 @@ namespace TranslationFilesGenerator.Tools
 			{
 				var opcode = finallyBlockInstructions[index].opcode;
 				if (opcode == OpCodes.Leave || opcode == OpCodes.Leave_S || opcode == OpCodes.Ret || opcode == OpCodes.Rethrow || opcode == OpCodes.Jmp)
-					throw new ArgumentException($"finallyBlockInstructions[{index}] {finallyBlockInstructions[index]} has invalid opcode in finally block");
+					throw new ArgumentException($"finallyBlockInstructions[{index}] '{finallyBlockInstructions[index].ToDebugString()}' has invalid opcode in finally block");
 			}
 			foreach (var labelRef in InvalidBranchInstructions(finallyBlockInstructions, "finallyBlockInstructions", 0, finallyInstructionCount, validLabels: labelsWithinTryBlock))
 			{
-				throw new ArgumentException($"finallyBlockInstructions[{labelRef.Index}] {labelRef.Instruction} targets a label outside of finally block: {labelRef.Label}");
+				throw new ArgumentException($"finallyBlockInstructions[{labelRef.Index}] '{labelRef.Instruction.ToDebugString()}' targets a label outside of finally block: " +
+					labelRef.Label.ToDebugString());
 			}
 
 			// Validate that branch instructions outside the try block cannot target inside the try block.
@@ -220,7 +231,8 @@ namespace TranslationFilesGenerator.Tools
 				InvalidBranchInstructions(methodInstructions, "methodInstructions", 0, tryStartIndex, invalidLabels: labelsWithinTryBlock),
 				InvalidBranchInstructions(methodInstructions, "methodInstructions", finallyInsertIndex, instructionCount, invalidLabels: labelsWithinTryBlock)))
 			{
-				throw new ArgumentException($"methodInstructions[{labelRef.Index}] {labelRef.Instruction} targets a label inside try block: {labelRef.Label}");
+				throw new ArgumentException($"methodInstructions[{labelRef.Index}] '{labelRef.Instruction.ToDebugString()}' targets a label inside try block: " +
+					labelRef.Label.ToDebugString());
 			}
 
 			// Mark start of the try block.
@@ -366,7 +378,7 @@ namespace TranslationFilesGenerator.Tools
 		static IEnumerable<LabelRef> InvalidBranchInstructions(IList<CodeInstruction> instructions, string instructionsName, int startIndex, int endIndexExcl,
 			ICollection<Label> invalidLabels = null, ICollection<Label> validLabels = null)
 		{
-			for (var index = 0; index < endIndexExcl; index++)
+			for (var index = startIndex; index < endIndexExcl; index++)
 			{
 				var instruction = instructions[index];
 				var opcode = instruction.opcode;
@@ -426,7 +438,7 @@ namespace TranslationFilesGenerator.Tools
 					// Determine whether a final ret instruction that has an existing leave pointing to it already exists.
 					if (instructionCount >= 1)
 					{
-						var finalReturnIndex = methodInstructions.FindLastIndex(instructionCount - 1, instructionCount - 1 - finallyInsertIndex,
+						var finalReturnIndex = methodInstructions.FindLastIndex(instructionCount - 1, instructionCount - finallyInsertIndex,
 							instruction => equalsOpcodeToConvertPredicate(instruction) && instruction.labels.Count > 0);
 						if (finalReturnIndex != -1)
 						{
@@ -444,6 +456,7 @@ namespace TranslationFilesGenerator.Tools
 					{
 						finalLabel = ilGenerator.DefineLabel();
 						methodInstructions.Add(new CodeInstruction(opcodeToConvert) { labels = { finalLabel.Value } });
+						instructionCount++;
 					}
 
 					// Existing ret instructions in the range will be turned into a leave to the final ret instruction.
@@ -452,6 +465,8 @@ namespace TranslationFilesGenerator.Tools
 						methodInstructions[index].SetTo(OpCodes.Leave, finalLabel.Value);
 						count -= index + 1 - searchIndex;
 						searchIndex = index + 1;
+						if (count < 0 || searchIndex >= instructionCount)
+							break;
 						index = methodInstructions.FindIndex(searchIndex, count, equalsOpcodeToConvertPredicate);
 					} while (index != -1);
 				}
@@ -463,7 +478,7 @@ namespace TranslationFilesGenerator.Tools
 					// Determine whether a final ldloc.s + ret instruction that has an existing stloc.s + leave pointing to it already exists.
 					if (instructionCount >= 1)
 					{
-						var finalReturnIndex = methodInstructions.FindLastIndex(instructionCount - 1, instructionCount - 1 - finallyInsertIndex,
+						var finalReturnIndex = methodInstructions.FindLastIndex(instructionCount - 1, instructionCount - finallyInsertIndex,
 							instruction => instruction.opcode == OpCodes.Ldloc_S && instruction.labels.Count > 0,
 							equalsOpcodeToConvertPredicate);
 						if (finalReturnIndex != -1)
@@ -490,6 +505,7 @@ namespace TranslationFilesGenerator.Tools
 							new CodeInstruction(OpCodes.Ldloc_S, returnValueVar) { labels = { finalLabel.Value } },
 							new CodeInstruction(opcodeToConvert),
 						});
+						instructionCount += 2;
 					}
 
 					// Existing ret instructions in the range will be turned into a stloc.s to the new return value variable, then a leave to the final ldloc.s instruction.
@@ -500,6 +516,8 @@ namespace TranslationFilesGenerator.Tools
 						finallyInsertIndex++;
 						count -= index + 2 - searchIndex;
 						searchIndex = index + 2;
+						if (count < 0 || searchIndex >= instructionCount)
+							break;
 						index = methodInstructions.FindIndex(searchIndex, count, equalsOpcodeToConvertPredicate);
 					} while (index != -1);
 				}
