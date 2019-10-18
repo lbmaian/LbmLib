@@ -263,7 +263,7 @@ namespace TranslationFilesGenerator.Tools
 					finallyInsertIndex++;
 					labelRef.Label = newLeaveLabel;
 				}
-				else
+				else // if labelRef.instruction.opcode is br or br.s
 				{
 					labelRef.Instruction.opcode = OpCodes.Leave;
 					labelRef.Label = afterExceptionBlockLabel;

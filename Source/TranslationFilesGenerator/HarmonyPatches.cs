@@ -813,7 +813,8 @@ namespace TranslationFilesGenerator
 					newInstructions.AddRange(new[]
 					{
 						instructions[englishListVarLoadIndex].Clone(),
-						new CodeInstruction(OpCodes.Call, typeof(LanguageExtensions).GetMethod(nameof(LanguageExtensions.AsList), AccessTools.all).MakeGenericMethod(typeof(string))),
+						new CodeInstruction(OpCodes.Call,
+							typeof(Tools.CollectionExtensions).GetMethod(nameof(Tools.CollectionExtensions.AsList), AccessTools.all).MakeGenericMethod(typeof(string))),
 						new CodeInstruction(OpCodes.Ldnull), // comments
 						new CodeInstruction(OpCodes.Call, typeof(DefInjectionPackage).GetMethod("TryAddFullListInjection", AccessTools.all)),
 					});
