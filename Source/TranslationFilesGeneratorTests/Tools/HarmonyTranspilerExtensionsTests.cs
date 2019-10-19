@@ -14,9 +14,9 @@ namespace TranslationFilesGenerator.Tools.Tests
 		static HarmonyInstance harmony;
 
 		[ClassInitialize]
-		public static void ClassInitialize(TestContext context)
+		public static void ClassInitialize(TestContext _)
 		{
-			DebugExtensions.DefaultLogger = str => Console.WriteLine(str);
+			Logging.DefaultLogger = Logging.ConsoleLogger;
 		}
 
 		[TestInitialize]
@@ -48,14 +48,9 @@ namespace TranslationFilesGenerator.Tools.Tests
 		public static IEnumerable<CodeInstruction> TestTryFinallyTranspiler(IEnumerable<CodeInstruction> instructionEnumerable, MethodBase method, ILGenerator ilGenerator)
 		{
 			var instructions = instructionEnumerable.AsList();
-			Console.WriteLine(instructions.ToDebugString("before\n\t"));
-			instructions.AddTryFinally(method, ilGenerator, new[]
-			{
-				new CodeInstruction(OpCodes.Ldstr, "Hello world"),
-				new CodeInstruction(OpCodes.Call, typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ConsoleLogged)).MakeGenericMethod(typeof(string))),
-				new CodeInstruction(OpCodes.Pop),
-			});
-			Console.WriteLine(instructions.ToDebugString("after\n\t"));
+			instructions.ToDebugString().Log("before");
+			instructions.AddTryFinally(method, ilGenerator, HarmonyTranspilerExtensions.StringLogInstructions("hello world"));
+			instructions.ToDebugString().Log("after");
 			return instructions;
 		}
 
@@ -77,19 +72,14 @@ namespace TranslationFilesGenerator.Tools.Tests
 		{
 			var origInstructions = instructionEnumerable.ToList();
 			var instructions = instructionEnumerable.AsList();
-			Console.WriteLine(instructions.ToDebugString("before deoptimize\n\t"));
+			instructions.ToDebugString().Log("before deoptimize");
 			instructions.DeoptimizeLocalVarInstructions(method, ilGenerator);
-			Console.WriteLine(instructions.ToDebugString("after deoptimize\n\t"));
+			instructions.ToDebugString().Log("after deoptimize");
 			instructions.ReoptimizeLocalVarInstructions();
-			Console.WriteLine(instructions.ToDebugString("after reoptimize\n\t"));
+			instructions.ToDebugString().Log("after reoptimize");
 			CollectionAssert.AreEqual(origInstructions, instructions);
-			instructions.InsertRange(instructions.Count - 1, new[]
-			{
-				new CodeInstruction(OpCodes.Ldstr, "Hello world") { labels = instructions[instructions.Count - 1].labels.PopAll() },
-				new CodeInstruction(OpCodes.Call, typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ConsoleLogged)).MakeGenericMethod(typeof(string))),
-				new CodeInstruction(OpCodes.Pop),
-			});
-			Console.WriteLine(instructions.ToDebugString("after\n\t"));
+			instructions.SafeInsertRange(instructions.Count - 1, HarmonyTranspilerExtensions.StringLogInstructions("hello world"));
+			instructions.ToDebugString().Log("after");
 			return instructions;
 		}
 

@@ -1,9 +1,26 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Verse;
 
 namespace TranslationFilesGenerator.Tools
 {
+	public static class RimWorldLogging
+	{
+		public static readonly Action<string> RWLogger = str => Verse.Log.Message(str);
+
+		public static readonly Action<string> UnityLogger = str => UnityEngine.Debug.Log(str);
+
+		public static readonly Func<object, string> RWToStringer = obj =>
+		{
+			if (obj is string str)
+				return str;
+			if (obj is System.Collections.IEnumerable enumerable)
+				return enumerable.ToStringSafeEnumerable();
+			return obj.ToStringSafe();
+		};
+	}
+
 	public static class LoadedLanguageExtensions
 	{
 		public static string LanguageLabel(this LoadedLanguage language)

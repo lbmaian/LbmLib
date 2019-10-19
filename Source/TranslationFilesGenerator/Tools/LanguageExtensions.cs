@@ -90,7 +90,7 @@ namespace TranslationFilesGenerator.Tools
 
 		public static int FindIndex<T>(this IList<T> list, int startIndex, int count, params Func<T, bool>[] sequenceMatches)
 		{
-			if (sequenceMatches == null)
+			if (sequenceMatches is null)
 				throw new ArgumentNullException(nameof(sequenceMatches));
 			if (sequenceMatches.Length == 0)
 				throw new ArgumentException($"sequenceMatches must not be empty");
@@ -131,7 +131,7 @@ namespace TranslationFilesGenerator.Tools
 
 		public static int FindLastIndex<T>(this IList<T> list, int startIndex, int count, params Func<T, bool>[] sequenceMatches)
 		{
-			if (sequenceMatches == null)
+			if (sequenceMatches is null)
 				throw new ArgumentNullException(nameof(sequenceMatches));
 			if (sequenceMatches.Length == 0)
 				throw new ArgumentException($"sequenceMatches must not be empty");
@@ -208,7 +208,7 @@ namespace TranslationFilesGenerator.Tools
 				actualList.InsertRange(index, collection);
 				return;
 			}
-			if (collection == null)
+			if (collection is null)
 				throw new ArgumentNullException(nameof(collection));
 			if (index < 0)
 				throw new ArgumentOutOfRangeException($"index ({index}) cannot be < 0");
@@ -229,7 +229,7 @@ namespace TranslationFilesGenerator.Tools
 				actualList.AddRange(collection);
 				return;
 			}
-			if (collection == null)
+			if (collection is null)
 				throw new ArgumentNullException(nameof(collection));
 			foreach (var item in collection)
 			{
@@ -335,18 +335,18 @@ namespace TranslationFilesGenerator.Tools
 				list[i] = array[i];
 		}
 
-		public static void Sort<T>(this IList<T> list, Comparison<T> comparison)
+		public static void Sort<T>(this IList<T> list, Func<T, T, int> comparison)
 		{
 			if (list is List<T> actualList)
 			{
-				actualList.Sort(comparison);
+				actualList.Sort(new Comparison<T>(comparison));
 				return;
 			}
 			// TODO: This could be made more efficient by implementing algorithm in Array.Sort(array, comparison),
 			// although it's probably not worth the effort.
 			var listCount = list.Count;
 			var array = new T[listCount];
-			Array.Sort(array, comparison);
+			Array.Sort(array, new Comparison<T>(comparison));
 			for (var i = 0; i < listCount; i++)
 				list[i] = array[i];
 		}
@@ -513,7 +513,7 @@ namespace TranslationFilesGenerator.Tools
 			if (list is List<T> actualList)
 				return actualList.RemoveAll(new Predicate<T>(match));
 			// Following is based off both Mono and MS .NET Framework implementations.
-			if (match == null)
+			if (match is null)
 				throw new ArgumentNullException(nameof(match));
 			var listCount = list.Count;
 			var freeIndex = 0;
@@ -627,7 +627,7 @@ namespace TranslationFilesGenerator.Tools
 
 		static int FindIndexInternal<T>(IList<T> list, int startIndex, int count, Func<T, bool> match)
 		{
-			if (match == null)
+			if (match is null)
 				throw new ArgumentNullException(nameof(match));
 			var endIndexExcl = startIndex + count;
 			for (var index = startIndex; index < endIndexExcl; index++)
@@ -707,7 +707,7 @@ namespace TranslationFilesGenerator.Tools
 
 		static int FindLastIndexInternal<T>(IList<T> list, int startIndex, int count, Func<T, bool> match)
 		{
-			if (match == null)
+			if (match is null)
 				throw new ArgumentNullException(nameof(match));
 			var endIndexExcl = startIndex - count;
 			for (var index = startIndex; index > endIndexExcl; index--)

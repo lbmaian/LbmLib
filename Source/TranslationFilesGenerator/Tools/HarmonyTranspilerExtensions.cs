@@ -14,6 +14,8 @@ namespace TranslationFilesGenerator.Tools
 		// Certain CodeInstruction operands aren't being formatted well in CodeInstruction.ToString, so provide a better version.
 		public static string ToDebugString(this CodeInstruction instruction)
 		{
+			if (instruction is null)
+				return "null";
 			var operandStr = OperandToDebugString(instruction.operand, instruction.opcode);
 			if (operandStr.Length != 0)
 				operandStr = " " + operandStr;
@@ -25,7 +27,14 @@ namespace TranslationFilesGenerator.Tools
 
 		static string OperandToDebugString(object operand, OpCode opcode)
 		{
-			if (operand is Type type)
+			if (operand is null)
+			{
+				if (opcode.OperandType == OperandType.InlineNone)
+					return "";
+				else
+					return "null";
+			}
+			else if (operand is Type type)
 				return type.ToDebugString();
 			else if (operand is FieldInfo field)
 				return field.ToDebugString();
@@ -33,26 +42,24 @@ namespace TranslationFilesGenerator.Tools
 				return method.ToDebugString();
 			else if (operand is LocalBuilder localBuilder)
 				return localBuilder.LocalIndex + " (" + localBuilder.LocalType.ToDebugString() + ")";
-			else if (operand is null && opcode.OperandType == OperandType.InlineNone)
-				return "";
 			else
 				return Emitter.FormatArgument(operand);
 		}
 
 		public static string ToDebugString(this Label label) => "Label" + label.GetHashCode();
 
-		public static string ToDebugString(this ExceptionBlock block) => "EX_" + block.blockType.ToString().Replace("Block", "");
+		public static string ToDebugString(this ExceptionBlock block) => block is null ? "null" : "EX_" + block.blockType.ToString().Replace("Block", "");
 
-		public static string ItemToDebugString(this IList<CodeInstruction> instructions, int index, string label = "")
+		public static string ItemToDebugString(this IList<CodeInstruction> instructions, int index)
 		{
 			if (index < 0 || index >= instructions.Count)
-				throw new ArgumentOutOfRangeException($"{label}{index}: <out of range [0..{instructions.Count - 1}]>");
-			return $"{label}{index}: {instructions[index].ToDebugString()}";
+				throw new ArgumentOutOfRangeException($"{index}: <out of range [0..{instructions.Count - 1}]>");
+			return $"{index}: {instructions[index].ToDebugString()}";
 		}
 
-		public static string RangeToDebugString(this IList<CodeInstruction> instructions, int startIndex, int count, string label = "", string delimiter = "\n\t")
+		public static string RangeToDebugString(this IList<CodeInstruction> instructions, int startIndex, int count, string delimiter = "\n\t")
 		{
-			var sb = new StringBuilder(label);
+			var sb = new StringBuilder();
 			for (int index = startIndex; index < startIndex + count; index++)
 			{
 				if (index != startIndex)
@@ -62,9 +69,72 @@ namespace TranslationFilesGenerator.Tools
 			return sb.ToString();
 		}
 
-		public static string ToDebugString(this IList<CodeInstruction> instructions, string label = "", string delimiter = "\n\t")
+		public static string ToDebugString(this IList<CodeInstruction> instructions)
 		{
-			return instructions.RangeToDebugString(0, instructions.Count, label, delimiter);
+			return instructions.ToDebugString("\n\t");
+		}
+
+		public static string ToDebugString(this IList<CodeInstruction> instructions, string delimiter = "\n\t")
+		{
+			return instructions?.RangeToDebugString(0, instructions.Count, delimiter) ?? "null";
+		}
+
+		// Instructions snippet that calls Logger.Log(str).
+		public static CodeInstruction[] StringLogInstructions(string str)
+		{
+			return new[]
+			{
+				string.IsNullOrEmpty(str) ? new CodeInstruction(OpCodes.Ldnull) : new CodeInstruction(OpCodes.Ldstr, str),
+				new CodeInstruction(OpCodes.Ldnull), // label
+				new CodeInstruction(OpCodes.Ldnull), // labelDelimiter
+				new CodeInstruction(OpCodes.Ldnull), // logger
+				new CodeInstruction(OpCodes.Ldnull), // toStringer
+				new CodeInstruction(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.Log)).MakeGenericMethod(typeof(string))),
+			};
+		}
+
+		// Instructions snippet that calls Logger.Log(<popped value off CIL stack>, label).
+		public static CodeInstruction[] StackLogInstructions<T>(string label = "")
+		{
+			return new[]
+			{
+				string.IsNullOrEmpty(label) ? new CodeInstruction(OpCodes.Ldnull) : new CodeInstruction(OpCodes.Ldstr, label),
+				new CodeInstruction(OpCodes.Ldnull), // labelDelimiter
+				new CodeInstruction(OpCodes.Ldnull), // logger
+				new CodeInstruction(OpCodes.Ldnull), // toStringer
+				new CodeInstruction(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.Log)).MakeGenericMethod(typeof(T))),
+			};
+		}
+
+		// Instructions snippet that calls Logger.Logged(<popped value off CIL stack>, label), optionally popping its returned value off the stack afterwards.
+		public static CodeInstruction[] StackLoggedInstructions<T>(string label = "", bool popStack = false)
+		{
+			return new[]
+			{
+				string.IsNullOrEmpty(label) ? new CodeInstruction(OpCodes.Ldnull) : new CodeInstruction(OpCodes.Ldstr, label),
+				new CodeInstruction(OpCodes.Ldnull), // labelDelimiter
+				new CodeInstruction(OpCodes.Ldnull), // logger
+				new CodeInstruction(OpCodes.Ldnull), // toStringer
+				new CodeInstruction(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.Logged)).MakeGenericMethod(typeof(T))),
+				new CodeInstruction(popStack ? OpCodes.Pop : OpCodes.Nop),
+			};
+		}
+
+		public static void SafeInsert(this IList<CodeInstruction> instructions, int index, CodeInstruction newInstruction)
+		{
+			var origInstruction = instructions[index];
+			instructions.Insert(index, newInstruction);
+			newInstruction.labels.AddRange(origInstruction.labels.PopAll());
+			newInstruction.blocks.AddRange(origInstruction.blocks.PopAll());
+		}
+
+		public static void SafeInsertRange(this IList<CodeInstruction> instructions, int index, IEnumerable<CodeInstruction> newInstructions)
+		{
+			var origInstruction = instructions[index];
+			instructions.InsertRange(index, newInstructions);
+			var newInstruction = instructions[index];
+			newInstruction.labels.AddRange(origInstruction.labels.PopAll());
+			newInstruction.blocks.AddRange(origInstruction.blocks.PopAll());
 		}
 
 		public static List<CodeInstruction> CloneRange(this IList<CodeInstruction> instructions, int index, int count)
@@ -108,7 +178,7 @@ namespace TranslationFilesGenerator.Tools
 			{
 				// Assume we're using MS .NET Framework mscorlib implementation. We'll have to construct dummy LocalBuilder's.
 				var localBuilderConstructor = typeof(LocalBuilder).GetConstructor(AccessTools.all, null, new[] { typeof(int), typeof(Type), typeof(MethodInfo), typeof(bool) }, null);
-				if (localBuilderConstructor == null)
+				if (localBuilderConstructor is null)
 					throw new InvalidOperationException("Could find neither existing LocalBuilder's on ILGenerator nor an expected LocalBuilder constructor");
 				var localVars = method.GetMethodBody().LocalVariables;
 				localBuilders = new LocalBuilder[Math.Min(4, localVars.Count)];
@@ -321,9 +391,8 @@ namespace TranslationFilesGenerator.Tools
 			new[] { OpCodes.Leave_S, OpCodes.Leave },
 		};
 
-		static readonly Dictionary<OpCode, OpCode[]> OpcodeForms;
+		static readonly Dictionary<OpCode, OpCode[]> OpcodeForms = InitializeOpcodeForms();
 
-		// Called in static constructor to initialize OpcodeForms.
 		static Dictionary<OpCode, OpCode[]> InitializeOpcodeForms()
 		{
 			var opcodeForms = new Dictionary<OpCode, OpCode[]>();
@@ -452,23 +521,25 @@ namespace TranslationFilesGenerator.Tools
 						}
 					}
 					// If it doesn't exist, add the final ret instruction.
-					if (finalLabel == null)
+					if (finalLabel is null)
 					{
 						finalLabel = ilGenerator.DefineLabel();
 						methodInstructions.Add(new CodeInstruction(opcodeToConvert) { labels = { finalLabel.Value } });
-						instructionCount++;
+						// Don't advance instructionCount, since we don't want to convert this ret into a leave below.
 					}
 
 					// Existing ret instructions in the range will be turned into a leave to the final ret instruction.
 					do
 					{
 						methodInstructions[index].SetTo(OpCodes.Leave, finalLabel.Value);
-						count -= index + 1 - searchIndex;
-						searchIndex = index + 1;
+						var searchIndexDelta = index + 1 - searchIndex;
+						count -= searchIndexDelta;
+						searchIndex += searchIndexDelta;
 						if (count < 0 || searchIndex >= instructionCount)
 							break;
 						index = methodInstructions.FindIndex(searchIndex, count, equalsOpcodeToConvertPredicate);
-					} while (index != -1);
+					}
+					while (index != -1);
 				}
 				// Else if method has non-void return type...
 				else
@@ -496,7 +567,7 @@ namespace TranslationFilesGenerator.Tools
 						}
 					}
 					// If it doesn't exist, add the final ldloc.s + ret instruction, declaring a new var for the ldloc.s instruction.
-					if (finalLabel == null)
+					if (finalLabel is null)
 					{
 						returnValueVar = ilGenerator.DeclareLocal(returnType);
 						finalLabel = ilGenerator.DefineLabel();
@@ -505,7 +576,7 @@ namespace TranslationFilesGenerator.Tools
 							new CodeInstruction(OpCodes.Ldloc_S, returnValueVar) { labels = { finalLabel.Value } },
 							new CodeInstruction(opcodeToConvert),
 						});
-						instructionCount += 2;
+						// Don't advance instructionCount, since we don't want to convert this ret into a leave below.
 					}
 
 					// Existing ret instructions in the range will be turned into a stloc.s to the new return value variable, then a leave to the final ldloc.s instruction.
@@ -513,20 +584,18 @@ namespace TranslationFilesGenerator.Tools
 					{
 						methodInstructions[index].SetTo(OpCodes.Stloc_S, returnValueVar);
 						methodInstructions.Insert(index + 1, new CodeInstruction(OpCodes.Leave, finalLabel.Value));
+						instructionCount++;
 						finallyInsertIndex++;
-						count -= index + 2 - searchIndex;
-						searchIndex = index + 2;
+						var searchIndexDelta = index + 2 - searchIndex;
+						count = count - searchIndexDelta + 1;
+						searchIndex += searchIndexDelta;
 						if (count < 0 || searchIndex >= instructionCount)
 							break;
 						index = methodInstructions.FindIndex(searchIndex, count, equalsOpcodeToConvertPredicate);
-					} while (index != -1);
+					}
+					while (index != -1);
 				}
 			}
-		}
-
-		static HarmonyTranspilerExtensions()
-		{
-			OpcodeForms = InitializeOpcodeForms();
 		}
 	}
 
