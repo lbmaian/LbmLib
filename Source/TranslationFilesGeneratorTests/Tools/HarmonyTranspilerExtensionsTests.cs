@@ -11,12 +11,26 @@ namespace TranslationFilesGenerator.Tools.Tests
 	[TestClass]
 	public class HarmonyTranspilerExtensionsTests
 	{
-		static HarmonyInstance harmony;
+		HarmonyInstance harmony;
 
-		[ClassInitialize]
-		public static void ClassInitialize(TestContext _)
+		// TODO: Generalize this into a class in Logger.cs?
+		class ListLogger : IDisposable
 		{
-			Logging.DefaultLogger = Logging.ConsoleLogger;
+			readonly Action<string> origLogger;
+
+			public readonly List<string> List;
+
+			public ListLogger()
+			{
+				origLogger = Logging.DefaultLogger;
+				List = new List<string>();
+				Logging.DefaultLogger = str => List.Add(str);
+			}
+
+			public void Dispose()
+			{
+				Logging.DefaultLogger = origLogger;
+			}
 		}
 
 		[TestInitialize]
@@ -33,16 +47,59 @@ namespace TranslationFilesGenerator.Tools.Tests
 
 		public static void SampleVoidMethod(IEnumerable<int> enumerable, Action<int> action)
 		{
+			var r = "";
 			foreach (var item in enumerable)
+			{
+				// Note: The compiler often optimizes away a switch instruction into multiple other branch conditionals, regardless of build optimization setting.
+				// The following switch statement is somehow kept as a switch instruction, and I don't know why, but we need to test switch instructions.
+				switch (item)
+				{
+				case 0:
+					r = "a";
+					break;
+				case 1:
+					r = "b";
+					break;
+				case 4:
+					r = "c";
+					Logging.Log(r);
+					return;
+				default:
+					r = "default";
+					break;
+				}
 				action(item);
+			}
+			Logging.Log(r);
 		}
 
-		public static bool SampleNonVoidMethod(IEnumerable<int> enumerable, Func<int, bool> predicate)
+		public static int SampleNonVoidMethod(IEnumerable<int> enumerable, Action<int> action)
 		{
+			var r = "";
 			foreach (var item in enumerable)
-				if (predicate(item))
-					return true;
-			return false;
+			{
+				// Note: The compiler often optimizes away a switch instruction into multiple other branch conditionals, regardless of build optimization setting.
+				// The following switch statement is somehow kept as a switch instruction, and I don't know why, but we need to test switch instructions.
+				switch (item)
+				{
+				case 0:
+					r = "a";
+					break;
+				case 1:
+					r = "b";
+					break;
+				case 4:
+					r = "c";
+					Logging.Log(r);
+					return 100;
+				default:
+					r = "default";
+					break;
+				}
+				action(item);
+			}
+			Logging.Log(r);
+			return -1;
 		}
 
 		public static IEnumerable<CodeInstruction> TestTryFinallyTranspiler(IEnumerable<CodeInstruction> instructionEnumerable, MethodBase method, ILGenerator ilGenerator)
@@ -51,21 +108,30 @@ namespace TranslationFilesGenerator.Tools.Tests
 			instructions.ToDebugString().Log("before");
 			instructions.AddTryFinally(method, ilGenerator, HarmonyTranspilerExtensions.StringLogInstructions("hello world"));
 			instructions.ToDebugString().Log("after");
+			
 			return instructions;
 		}
 
 		[TestMethod]
-		public void AddTryFinallyTest1()
+		public void AddTryFinallyTestVoidMethod1()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestTryFinallyTranspiler))));
-			SampleVoidMethod(new[] { 1, 2, 3, 4 }, x => Console.WriteLine(x));
+			using (var listLogger = new ListLogger())
+			{
+				SampleVoidMethod(new[] { 1, 2, 3, 4 }, x => Logging.Log(x));
+				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, listLogger.List);
+			}
 		}
 
 		[TestMethod]
-		public void AddTryFinallyTest2()
+		public void AddTryFinallyTestNonVoidMethod1()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleNonVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestTryFinallyTranspiler))));
-			Console.WriteLine(SampleNonVoidMethod(new[] { 1, 2, 3, 4 }, x => x % 2 == 0));
+			using (var listLogger = new ListLogger())
+			{
+				Assert.AreEqual(100, SampleNonVoidMethod(new[] { 1, 2, 3, 4 }, x => Logging.Log(x)));
+				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, listLogger.List);
+			}
 		}
 
 		public static IEnumerable<CodeInstruction> TestDeReOptimizeLocalVarTranspiler(IEnumerable<CodeInstruction> instructionEnumerable, MethodBase method, ILGenerator ilGenerator)
@@ -87,7 +153,11 @@ namespace TranslationFilesGenerator.Tools.Tests
 		public void DeoptimizeLocalVarInstructionsTest()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestDeReOptimizeLocalVarTranspiler))));
-			SampleVoidMethod(new[] { 1, 2, 3, 4 }, x => Console.WriteLine(x));
+			using (var listLogger = new ListLogger())
+			{
+				SampleVoidMethod(new[] { 1, 2, 3, 4 }, x => Logging.Log(x));
+				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, listLogger.List);
+			}
 		}
 	}
 }

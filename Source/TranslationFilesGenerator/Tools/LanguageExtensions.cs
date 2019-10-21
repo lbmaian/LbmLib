@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text;
 
 namespace TranslationFilesGenerator.Tools
 {
@@ -18,6 +19,22 @@ namespace TranslationFilesGenerator.Tools
 			var collectionCopy = new List<T>(collection);
 			collection.Clear();
 			return collectionCopy;
+		}
+
+		// XXX: Needs a better name.
+		public static List<T> PopAll<T>(this ICollection<T> collection, Func<T, bool> match)
+		{
+			var removedItems = new List<T>();
+			collection.RemoveAll(item =>
+			{
+				if (match(item))
+				{
+					removedItems.Add(item);
+					return true;
+				}
+				return false;
+			});
+			return removedItems;
 		}
 
 		// XXX: Needs a better name.
@@ -73,9 +90,28 @@ namespace TranslationFilesGenerator.Tools
 			return removeCount;
 		}
 
-		public static string Join<T>(this IEnumerable<T> enumerable, string delimiter = ", ")
+		public static string Join(this System.Collections.IEnumerable enumerable, string delimiter = ", ")
 		{
-			return enumerable.Aggregate("", (string prev, T curr) => prev + (prev.Length != 0 ? delimiter : "") + curr?.ToString() ?? "null");
+			var sb = new StringBuilder();
+			var first = true;
+			foreach (var item in enumerable)
+			{
+				if (first)
+					first = false;
+				else
+					sb.Append(delimiter);
+				sb.Append(item?.ToString() ?? "null");
+			}
+			return sb.ToString();
+		}
+
+		// Not named Reverse, since Enumerable.Reverse<T>(IEnumerable<T>) already exists, and string implements IEnumerable<char>.
+		// Also not a generic Unicode Reverse since it doesn't have special handling for Unicode surrogate pairs or Windows line breaks.
+		public static string SimpleReverse(this string str)
+		{
+			var chars = str.ToCharArray();
+			Array.Reverse(chars);
+			return new string(chars);
 		}
 
 		public static int FindIndex<T>(this IList<T> list, params Func<T, bool>[] sequenceMatches)
@@ -259,12 +295,16 @@ namespace TranslationFilesGenerator.Tools
 			}
 		}
 
-		public static void Reverse<T>(this IList<T> list)
+		// If this method was called Reverse, it would typically have overload preference over Enumerable.Reverse, which wouldn't be preferable
+		// for IList implementations that don't even support in-place reverses, such as arrays.
+		// Furthermore, Enumerable.Reverse has very different semantics with List.Reverse/IList.ReverseInPlace.
+		// The former returns a lazy reverse iterating wrapper enumerable while the latter reverses in-place and has void return type.
+		public static void ReverseInPlace<T>(this IList<T> list)
 		{
-			list.Reverse(0, list.Count);
+			list.ReverseInPlace(0, list.Count);
 		}
 
-		public static void Reverse<T>(this IList<T> list, int index, int count)
+		public static void ReverseInPlace<T>(this IList<T> list, int index, int count)
 		{
 			if (list is List<T> actualList)
 			{
@@ -716,6 +756,57 @@ namespace TranslationFilesGenerator.Tools
 					return index;
 			}
 			return -1;
+		}
+	}
+
+	public static class StringExtensions
+	{
+		// More convenient string methods for splitting strings.
+
+		public static string[] SplitStringDelimiter(this string str, string delimiter, StringSplitOptions options = StringSplitOptions.None)
+		{
+			return str.Split(new[] { delimiter }, options);
+		}
+
+		public static string[] SplitStringDelimiter(this string str, string[] delimiters, StringSplitOptions options = StringSplitOptions.None)
+		{
+			return str.Split(delimiters, options);
+		}
+
+		public static string[] SplitKeepStringDelimiter(this string str, string delimiter, int keepDelimiterIndex)
+		{
+			var leftDelimiter = delimiter.Substring(0, keepDelimiterIndex);
+			var rightDelimiter = delimiter.Substring(keepDelimiterIndex);
+			var strs = str.SplitStringDelimiter(delimiter);
+			var endIndex = strs.Length - 1;
+			if (endIndex == 0)
+				return strs;
+			strs[0] += leftDelimiter;
+			for (var index = 1;  index < endIndex; index++)
+			{
+				strs[index] = rightDelimiter + strs[index] + leftDelimiter;
+			}
+			strs[endIndex] = rightDelimiter + strs[endIndex];
+			return strs;
+		}
+	}
+
+	public static class TypeExtensions
+	{
+		public static IEnumerable<Type> GetParentTypes(this Type type, bool includeThisType = false)
+		{
+			if (type is null)
+				yield break;
+			if (includeThisType)
+				yield return type;
+			foreach (var @interface in type.GetInterfaces())
+				yield return @interface;
+			type = type.BaseType;
+			while (!(type is null))
+			{
+				yield return type;
+				type = type.BaseType;
+			}
 		}
 	}
 

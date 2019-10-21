@@ -34,6 +34,12 @@ namespace TranslationFilesGenerator.Tools
 				else
 					return "null";
 			}
+			else if (operand is string str)
+				return '"' + str + '"';
+			else if (operand is Label label)
+				return label.ToDebugString();
+			else if (operand is Label[] labels)
+				return labels.ToDebugString();
 			else if (operand is Type type)
 				return type.ToDebugString();
 			else if (operand is FieldInfo field)
@@ -43,7 +49,7 @@ namespace TranslationFilesGenerator.Tools
 			else if (operand is LocalBuilder localBuilder)
 				return localBuilder.LocalIndex + " (" + localBuilder.LocalType.ToDebugString() + ")";
 			else
-				return Emitter.FormatArgument(operand);
+				return operand.ToString().Trim();
 		}
 
 		public static string ToDebugString(this Label label) => "Label" + label.GetHashCode();
@@ -494,8 +500,7 @@ namespace TranslationFilesGenerator.Tools
 			var equalsOpcodeToConvertPredicate = new Func<CodeInstruction, bool>(instruction => instruction.opcode.EqualsIgnoreForm(opcodeToConvert));
 			var instructionCount = methodInstructions.Count;
 			var searchIndex = tryStartIndex;
-			var count = finallyInsertIndex - tryStartIndex;
-			var index = methodInstructions.FindIndex(searchIndex, count, equalsOpcodeToConvertPredicate);
+			var index = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex, equalsOpcodeToConvertPredicate);
 			if (index != -1)
 			{
 				var finalLabel = default(Label?);
@@ -503,7 +508,7 @@ namespace TranslationFilesGenerator.Tools
 				var returnType = (allowReturnValueTracking ? (method as MethodInfo)?.ReturnType : null) ?? typeof(void);
 				if (returnType == typeof(void))
 				{
-					// If any ret instruction exists in the range, ensure there is a final final ret instruction.
+					// If any ret instruction exists in the range, at the end of the method, ensure there is a final final ret instruction.
 					// Determine whether a final ret instruction that has an existing leave pointing to it already exists.
 					if (instructionCount >= 1)
 					{
@@ -512,7 +517,7 @@ namespace TranslationFilesGenerator.Tools
 						if (finalReturnIndex != -1)
 						{
 							var finalReturnInstruction = methodInstructions[finalReturnIndex];
-							var leaveIndex = methodInstructions.FindIndex(searchIndex, count,
+							var leaveIndex = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex,
 								instruction => instruction.opcode.EqualsIgnoreForm(OpCodes.Leave) && finalReturnInstruction.labels.Any(label => instruction.labels.Contains(label)));
 							if (leaveIndex != -1)
 							{
@@ -525,19 +530,17 @@ namespace TranslationFilesGenerator.Tools
 					{
 						finalLabel = ilGenerator.DefineLabel();
 						methodInstructions.Add(new CodeInstruction(opcodeToConvert) { labels = { finalLabel.Value } });
-						// Don't advance instructionCount, since we don't want to convert this ret into a leave below.
+						// Don't advance finallyInsertIndex, since the finally block will go before these added instructions.
 					}
 
 					// Existing ret instructions in the range will be turned into a leave to the final ret instruction.
 					do
 					{
 						methodInstructions[index].SetTo(OpCodes.Leave, finalLabel.Value);
-						var searchIndexDelta = index + 1 - searchIndex;
-						count -= searchIndexDelta;
-						searchIndex += searchIndexDelta;
-						if (count < 0 || searchIndex >= instructionCount)
+						searchIndex = index + 1;
+						if (searchIndex >= finallyInsertIndex)
 							break;
-						index = methodInstructions.FindIndex(searchIndex, count, equalsOpcodeToConvertPredicate);
+						index = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - searchIndex, equalsOpcodeToConvertPredicate);
 					}
 					while (index != -1);
 				}
@@ -545,8 +548,8 @@ namespace TranslationFilesGenerator.Tools
 				else
 				{
 					var returnValueVar = default(LocalBuilder);
-					// If any ret instruction exists in the range, ensure there is a final ldloc.s of variable that stores the return value, followed by a ret instruction.
-					// Determine whether a final ldloc.s + ret instruction that has an existing stloc.s + leave pointing to it already exists.
+					// If any ret instruction exists in the range, at the end of the method, ensure there is a final ldloc.s of variable that stores the return value,
+					// followed by a ret instruction. Determine whether a final ldloc.s + ret instruction that has an existing stloc.s + leave pointing to it already exists.
 					if (instructionCount >= 1)
 					{
 						var finalReturnIndex = methodInstructions.FindLastIndex(instructionCount - 1, instructionCount - finallyInsertIndex,
@@ -556,9 +559,10 @@ namespace TranslationFilesGenerator.Tools
 						{
 							var finalReturnValueStoreInstruction = methodInstructions[finalReturnIndex];
 							var finalReturnInstruction = methodInstructions[finalReturnIndex + 1];
-							var leaveIndex = methodInstructions.FindIndex(searchIndex, count,
+							var leaveIndex = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex,
 								instruction => instruction.opcode == OpCodes.Stloc_S && instruction.operand == finalReturnValueStoreInstruction.operand,
-								instruction => instruction.opcode.EqualsIgnoreForm(OpCodes.Leave) && finalReturnInstruction.labels.Any(label => instruction.labels.Contains(label)));
+								instruction => instruction.opcode.EqualsIgnoreForm(OpCodes.Leave) &&
+									finalReturnInstruction.labels.Any(label => instruction.labels.Contains(label)));
 							if (leaveIndex != -1)
 							{
 								returnValueVar = (LocalBuilder)methodInstructions[leaveIndex].operand;
@@ -576,7 +580,7 @@ namespace TranslationFilesGenerator.Tools
 							new CodeInstruction(OpCodes.Ldloc_S, returnValueVar) { labels = { finalLabel.Value } },
 							new CodeInstruction(opcodeToConvert),
 						});
-						// Don't advance instructionCount, since we don't want to convert this ret into a leave below.
+						// Don't advance finallyInsertIndex, since the finally block will go before these added instructions.
 					}
 
 					// Existing ret instructions in the range will be turned into a stloc.s to the new return value variable, then a leave to the final ldloc.s instruction.
@@ -584,14 +588,11 @@ namespace TranslationFilesGenerator.Tools
 					{
 						methodInstructions[index].SetTo(OpCodes.Stloc_S, returnValueVar);
 						methodInstructions.Insert(index + 1, new CodeInstruction(OpCodes.Leave, finalLabel.Value));
-						instructionCount++;
 						finallyInsertIndex++;
-						var searchIndexDelta = index + 2 - searchIndex;
-						count = count - searchIndexDelta + 1;
-						searchIndex += searchIndexDelta;
-						if (count < 0 || searchIndex >= instructionCount)
+						searchIndex = index + 2;
+						if (searchIndex >= finallyInsertIndex)
 							break;
-						index = methodInstructions.FindIndex(searchIndex, count, equalsOpcodeToConvertPredicate);
+						index = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - searchIndex, equalsOpcodeToConvertPredicate);
 					}
 					while (index != -1);
 				}

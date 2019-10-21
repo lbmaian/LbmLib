@@ -1,11 +1,9 @@
 ﻿using System;
-using System.CodeDom;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Microsoft.CSharp;
 
 namespace TranslationFilesGenerator.Tools
 {
@@ -33,38 +31,81 @@ namespace TranslationFilesGenerator.Tools
 
 			public override string ToString()
 			{
-				return $"[Type=\"{Type}\", {(IsCache ? "IsCache=true" : $"Method=\"{Method}\"")}, Delegate=\"{Delegate}\"]";
+				return $"[Type=\"{Type}\", {(IsCache ? "IsCache=true" : $"Method=\"{Method}\"")}, HasDelegate={(Delegate is null ? "false" : "true")}]";
 			}
 		}
 
-		static readonly HashSet<Assembly> ToDebugStringAssemblies = new HashSet<Assembly>();
+		static readonly HashSet<Assembly> ToDebugStringAssemblies = InitializeToDebugStringAssemblies();
 
-		static readonly Dictionary<Type, DynamicDispatchEntry> ToDebugStringDynamicDispatches = new Dictionary<Type, DynamicDispatchEntry>();
+		static HashSet<Assembly> InitializeToDebugStringAssemblies()
+		{
+			//Logging.Log(AppDomain.CurrentDomain.GetAssemblies().Select(assembly => $"{assembly}: " + assembly.AssemblyProductValue()).Join("\n\t"), "Assemblies");
+			var assemblyBlacklist = AppDomain.CurrentDomain.GetAssemblies().Where(assembly =>
+			{
+				var name = assembly.GetName().Name;
+				if (name is "System" || name is "mscorlib" || name is "UnityEngine")
+					return true;
+				if (name.StartsWith("System.") || name.StartsWith("UnityEngine."))
+					return true;
+				var product = assembly.AssemblyProductValue();
+				if (product.StartsWith("MONO ") || product.StartsWith("Microsoft "))
+					return true;
+				return false;
+			});
+			//Logging.Log(assemblyBlacklist.Join("\n\t"), "assemblyBlacklist");
+			return new HashSet<Assembly>(assemblyBlacklist);
+		}
 
-		static void InitializeToDebugStringDynamicDispatches(Assembly assembly)
+		static string AssemblyProductValue(this Assembly assembly)
+		{
+			return ((AssemblyProductAttribute)assembly.GetCustomAttributes(typeof(AssemblyProductAttribute), false).FirstOrDefault())?.Product ?? "";
+		}
+
+		static readonly Dictionary<Type, DynamicDispatchEntry> ToDebugStringDynamicDispatches = InitializeToDebugStringDynamicDispatches();
+
+		static Dictionary<Type, DynamicDispatchEntry> InitializeToDebugStringDynamicDispatches()
+		{
+			var toDebugStringDynamicDispatches = new Dictionary<Type, DynamicDispatchEntry>() { { typeof(object), BaseObjectToStringDynamicDispatchEntry } };
+			InitializeToDebugStringDynamicDispatches(toDebugStringDynamicDispatches, Assembly.GetExecutingAssembly());
+			return toDebugStringDynamicDispatches;
+		}
+
+		static void InitializeToDebugStringDynamicDispatches(Dictionary<Type, DynamicDispatchEntry> toDebugStringDynamicDispatches, Assembly assembly)
 		{
 			if (ToDebugStringAssemblies.Contains(assembly))
 				return;
 			ToDebugStringAssemblies.Add(assembly);
+			//Logging.Log($"InitializeToDebugStringDynamicDispatches for assembly {assembly}: {AssemblyProductValue(assembly)}");
 
 			foreach (var type in assembly.GetTypes())
 			{
-				foreach (var method in type.GetMethods(BindingFlags.Static | BindingFlags.Public))
+				if (IsStaticClass(type))
 				{
-					if (method.Name is "ToDebugString" && method.IsDefined(typeof(ExtensionAttribute), true))
+					foreach (var method in type.GetMethods(BindingFlags.Static | BindingFlags.Public))
 					{
-						var parameters = method.GetParameters();
-						if (parameters.Length == 1)
+						if (method.Name is "ToDebugString" && method.IsDefined(typeof(ExtensionAttribute), false))
 						{
-							var targetType = parameters[0].ParameterType;
-							if (targetType != typeof(object))
+							var parameters = method.GetParameters();
+							if (parameters.Length == 1 && parameters[0].ParameterType is var targetType && targetType != typeof(object))
 							{
-								// Construct delegate: (object obj) => ToDebugString((T)obj) where T is what type represents.
-								var paramExpr = Expression.Parameter(typeof(object), "obj");
-								var @delegate = Expression.Lambda<Func<object, string>>(Expression.Call(method, Expression.Convert(paramExpr, targetType)), paramExpr).Compile();
-								var dynamicDispatch = new DynamicDispatchEntry(targetType, method, @delegate);
-								//Logging.Log($"Init {targetType} dispatch: {dynamicDispatch}");
-								ToDebugStringDynamicDispatches.Add(targetType, dynamicDispatch);
+								if (method.ContainsGenericParameters)
+								{
+									// If the method has generic type parameters, we can't construct a delegate yet;
+									// it'll be constructed within ToDebugString when the full object type with closed generic type arguments are known.
+									var dispatch = new DynamicDispatchEntry(targetType, method, null);
+									//Logging.Log($"Partial init {targetType} dispatch: {dispatch}");
+									toDebugStringDynamicDispatches.Add(targetType, dispatch);
+								}
+								else
+								{
+									// Construct delegate: (object obj) => ToDebugString((T)obj) where T is what targetType represents.
+									var paramExpr = Expression.Parameter(typeof(object), "obj");
+									var @delegate = Expression.Lambda<Func<object, string>>(Expression.Call(method,
+										Expression.Convert(paramExpr, targetType)), paramExpr).Compile();
+									var dispatch = new DynamicDispatchEntry(targetType, method, @delegate);
+									//Logging.Log($"Init {targetType} dispatch: {dispatch}");
+									toDebugStringDynamicDispatches.Add(targetType, dispatch);
+								}
 							}
 						}
 					}
@@ -76,92 +117,281 @@ namespace TranslationFilesGenerator.Tools
 						// Construct delegate: (object obj) => ((T)obj).ToDebugString() where T is what type represents.
 						var paramExpr = Expression.Parameter(typeof(object), "obj");
 						var @delegate = Expression.Lambda<Func<object, string>>(Expression.Call(Expression.Convert(paramExpr, type), method), paramExpr).Compile();
-						var dynamicDispatch = new DynamicDispatchEntry(type, method, @delegate);
-						//Logging.Log($"Init {type} dispatch: {dynamicDispatch}");
-						ToDebugStringDynamicDispatches.Add(type, dynamicDispatch);
+						var dispatch = new DynamicDispatchEntry(type, method, @delegate);
+						//Logging.Log($"Init {type} dispatch: {dispatch}");
+						toDebugStringDynamicDispatches.Add(type, dispatch);
 					}
 				}
 			}
 		}
 
-		static readonly Func<object, string> ToStringDelegate =
-			(Func<object, string>)Delegate.CreateDelegate(typeof(Func<object, string>), typeof(object).GetMethod(nameof(Object.ToString)));
+		static bool IsStaticClass(Type type)
+		{
+			return type.IsClass && type.IsAbstract && type.IsSealed;
+		}
 
+		static readonly DynamicDispatchEntry BaseObjectToStringDynamicDispatchEntry = InitializeBaseObjectToStringDynamicDispatchEntry();
+
+		static DynamicDispatchEntry InitializeBaseObjectToStringDynamicDispatchEntry()
+		{
+			var type = typeof(object);
+			var method = type.GetMethod(nameof(object.ToString));
+			var @delegate = (Func<object, string>)Delegate.CreateDelegate(typeof(Func<object, string>), typeof(object).GetMethod(nameof(object.ToString)));
+			return new DynamicDispatchEntry(type, method, @delegate);
+		}
+
+		// Workaround for C# extension methods not supporting late binding for function overload resolution:
+		// Use a custom dynamic dispatch algorithm.
+		// This is not a full-featured single parameter function overload resolution algorithm but it suffices for most uses cases.
+		// (For example, doesn't account for generic type contravariance or other generic type constraints.)
+		// The actual function overload resolution algorithm is documented here:
+		// https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/expressions#overload-resolution
 		public static string ToDebugString(this object obj)
 		{
-			// Workaround for C# extension methods not supporting late binding - use a custom dynamic dispatch.
-			// This is not a full-featured single parameter dynamic dispatch algorithm (for example, doesn't account for generic covariance/contravariance)
-			// but it suffices for most use cases.
 			if (obj is null)
 				return "null";
+			if (obj is true)
+				return "true";
+			if (obj is false)
+				return "false";
+
 			var objType = obj.GetType();
-			InitializeToDebugStringDynamicDispatches(objType.Assembly);
-			if (ToDebugStringDynamicDispatches.TryGetValue(objType, out var foundDynamicDispatch))
-				return foundDynamicDispatch.Delegate(obj);
-			var dynamicDispatches = new List<DynamicDispatchEntry>();
-			foreach (var dynamicDispatch in ToDebugStringDynamicDispatches.Values)
+			InitializeToDebugStringDynamicDispatches(ToDebugStringDynamicDispatches, objType.Assembly);
+			if (ToDebugStringDynamicDispatches.TryGetValue(objType, out var foundDispatch))
 			{
-				if (!dynamicDispatch.IsCache && dynamicDispatch.Type.IsAssignableFrom(objType))
-					dynamicDispatches.Add(dynamicDispatch);
+				if (foundDispatch.Delegate is null)
+					throw new InvalidOperationException("Type of passed object unexpectedly has open generic type parameters: " + objType.ToDebugString());
+				return foundDispatch.Delegate(obj);
 			}
-			//Logging.Log($"{dynamicDispatches.Count} matching delegates: " + dynamicDispatches.Join());
-			if (dynamicDispatches.Count > 1)
+
+			foreach (var parentType in objType.GetParentTypes())
+				InitializeToDebugStringDynamicDispatches(ToDebugStringDynamicDispatches, parentType.Assembly);
+
+			var dispatches = new List<DynamicDispatchEntry>();
+			foreach (var dispatch in ToDebugStringDynamicDispatches.Values)
 			{
-				var exception = new AmbiguousMatchException("The call is ambiguous between the following methods: " +
-						dynamicDispatches.Select(dynamicDispatch => $"'{dynamicDispatch.Method.ToDebugString()}'").Join());
-				foundDynamicDispatch = new DynamicDispatchEntry(objType, null, _ => throw exception);
+				if (!dispatch.IsCache)
+				{
+					var dispatchMethod = dispatch.Method;
+					var dispatchType = dispatch.Type;
+					if (dispatchMethod.ContainsGenericParameters)
+					{
+						var methodGenericArgs = dispatch.Method.GetGenericArguments();
+						var constructedDispatchType = GetConstructedDispatchType(objType, dispatchType, methodGenericArgs);
+						//Logging.Log(constructedDispatchType, "constructedDispatchType");
+						if (!(constructedDispatchType is null))
+						{
+							// Any still open generic arguments or substituted with dummy types (arbitrarily choosing typeof(object) for this).
+							// This happens if the method has a generic type parameter that its method parameter doesn't need.
+							for (var index = 0; index < methodGenericArgs.Length; index++)
+							{
+								if (methodGenericArgs[index].IsGenericParameter)
+									methodGenericArgs[index] = typeof(object);
+							}
+
+							// Assertion: dispatch.Delegate is null and needs to be computed.
+							// Construct delegate: (object obj) => ToDebugString<T1,T2,...>((T)obj) where T is what type represents,
+							// and T1,T2,... are generic type parameters used within T.
+							var method = dispatchMethod.MakeGenericMethod(methodGenericArgs);
+							var paramExpr = Expression.Parameter(typeof(object), "obj");
+							var @delegate = Expression.Lambda<Func<object, string>>(Expression.Call(method,
+								Expression.Convert(paramExpr, objType)), paramExpr).Compile();
+							//Logging.Log($"Late init {objType} dispatch to {constructedDispatchType}");
+							// Using original non-constructed generic method, so that a possible AmbiguousMatchException has the correct message.
+							dispatches.Add(new DynamicDispatchEntry(constructedDispatchType, dispatchMethod, @delegate));
+						}
+					}
+					else
+					{
+						if (dispatchType.IsAssignableFrom(objType))
+							dispatches.Add(dispatch);
+					}
+				}
 			}
-			else if (dynamicDispatches.Count == 0)
+			var exception = default(Exception);
+			// Note: If it becomes apparent that this is still too trigger-happy with AmbiguousMatchException,
+			// implement more of the official "better function member" algorithm here:
+			// https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/expressions#better-function-member
+			//Logging.Log(dispatches.Join("\n\t"), "dispatches");
+			if (dispatches.Count > 1)
 			{
-				foundDynamicDispatch = new DynamicDispatchEntry(objType, null, ToStringDelegate);
+				var dispatchesExcludingCommonDerivedType = dispatches.PopAll(dispatch => !dispatches.All(otherDispatch => otherDispatch.Type.IsAssignableFrom(dispatch.Type)));
+				//Logging.Log(dispatchesExcludingCommonDerivedType.Join("\n\t"), "dispatchesExcludingCommonDerivedType");
+				//Logging.Log(dispatches.Join("\n\t"), "dispatches - dispatchesExcludingCommonDerivedType");
+				if (dispatches.Count == 0)
+					dispatches = dispatchesExcludingCommonDerivedType;
+				if (dispatches.Count > 1)
+				{
+					var dispatchesWithGenericMethods = dispatches.PopAll(dispatch => dispatch.Method.ContainsGenericParameters);
+					//Logging.Log(dispatchesWithGenericMethods.Join("\n\t"), "dispatchesWithGenericMethods");
+					//Logging.Log(dispatches.Join("\n\t"), "dispatches - dispatchesWithGenericMethods");
+					if (dispatches.Count == 0)
+						dispatches = dispatchesWithGenericMethods;
+					if (dispatches.Count > 1)
+					{
+						exception = new AmbiguousMatchException("The call is ambiguous between the following methods: " +
+							dispatches.Select(dispatch => $"'{dispatch.Method.ToDebugString()}'").Join());
+						foundDispatch = new DynamicDispatchEntry(objType, null, _ => throw exception);
+					}
+				}
+			}
+			if (exception is null)
+			{
+				var sourceDispatch = dispatches.Count == 0 ? BaseObjectToStringDynamicDispatchEntry : dispatches[0];
+				foundDispatch = new DynamicDispatchEntry(objType, null, sourceDispatch.Delegate);
+				//Logging.Log($"Cache {objType} dispatch from source: {sourceDispatch}");
 			}
 			else
 			{
-				foundDynamicDispatch = new DynamicDispatchEntry(objType, null, dynamicDispatches[0].Delegate);
+				//Logging.Log($"Cache {objType} dispatch with exception: {exception}");
 			}
-			//Logging.Log($"Cache {objType} dispatch: {foundDynamicDispatch}");
-			ToDebugStringDynamicDispatches.Add(objType, foundDynamicDispatch);
-			return foundDynamicDispatch.Delegate(obj);
+			ToDebugStringDynamicDispatches.Add(objType, foundDispatch);
+			return foundDispatch.Delegate(obj);
 		}
 
-		static readonly Dictionary<Type, string> ProviderTypeOutputCache = new Dictionary<Type, string>();
+		// Type.IsAssignableFrom can't handle open generic type parameters, so we have to effectively do the check ourselves.
+		// For example, IEnumerable<T> should match int[], since int[] implements interface IEnumerable<int>.
+		// If a match is found, returns a constructed generic type that represents dispatchType with closed generic arguments (e.g. IEnumerable<int>).
+		// We also modify methodGenericArgs for each open type for which we found a closed type.
+		// Simplifying assumption: Generic type parameters are all covariant.
+		static Type GetConstructedDispatchType(Type objType, Type dispatchType, Type[] methodGenericArgs)
+		{
+			if (dispatchType.IsGenericParameter)
+			{
+				methodGenericArgs[methodGenericArgs.IndexOf(dispatchType)] = objType;
+				return objType;
+			}
+			else if (dispatchType.ContainsGenericParameters)
+			{
+				var dispatchGenericTypeDefinition = dispatchType.GetGenericTypeDefinition();
+				foreach (var candidateType in objType.GetParentTypes(includeThisType: true))
+				{
+					if (candidateType.IsGenericType &&
+						candidateType.GetGenericTypeDefinition() is var candidateGenericTypeDefinition &&
+						candidateGenericTypeDefinition == dispatchGenericTypeDefinition)
+					{
+						var candidateGenericArgs = candidateType.GetGenericArguments();
+						var dispatchGenericArgs = dispatchType.GetGenericArguments();
+						for (var index = 0; index < dispatchGenericArgs.Length; index++)
+						{
+							var constructedDispatchGenericArg = GetConstructedDispatchType(candidateGenericArgs[index], dispatchGenericArgs[index], methodGenericArgs);
+							if (constructedDispatchGenericArg is null)
+								return null;
+							dispatchGenericArgs[index] = constructedDispatchGenericArg;
+						}
+						return dispatchGenericTypeDefinition.MakeGenericType(dispatchGenericArgs);
+					}
+				}
+				return null;
+			}
+			else
+			{
+				if (dispatchType.IsAssignableFrom(objType))
+					return dispatchType;
+				return null;
+			}
+		}
+
+		public static string ToDebugString(this string str)
+		{
+			return str;
+		}
+
+		public static string ToDebugString(this System.Collections.IEnumerable enumerable)
+		{
+			if (enumerable is null)
+				return "null";
+			return enumerable.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " {" + enumerable.Join() + "}";
+		}
+
+		public static string ToDebugString<T>(this IEnumerable<T> enumerable)
+		{
+			if (enumerable is null)
+				return "null";
+			return enumerable.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " { " + enumerable.Join() + " }";
+		}
+
+		static readonly Dictionary<Type, string> TypeToDebugStringCache = new Dictionary<Type, string>()
+		{
+			{ typeof(void), "void" },
+			{ typeof(object), "object" },
+			{ typeof(string), "string" },
+			{ typeof(bool), "bool" },
+			{ typeof(byte), "byte" },
+			{ typeof(sbyte), "sbyte" },
+			{ typeof(short), "short" },
+			{ typeof(ushort), "ushort" },
+			{ typeof(int), "int" },
+			{ typeof(uint), "uint" },
+			{ typeof(long), "long" },
+			{ typeof(ulong), "ulong" },
+			{ typeof(char), "char" },
+			{ typeof(float), "float" },
+			{ typeof(double), "double" },
+			{ typeof(decimal), "decimal" },
+		};
 
 		public static string ToDebugString(this Type type)
 		{
+			return ToDebugString(type, includeNamespace: true, includeDeclaringType: true);
+		}
+
+		public static string ToDebugString(this Type type, bool includeNamespace, bool includeDeclaringType)
+		{
 			if (type is null)
 				return "null";
-			if (type.IsGenericType)
+			if (type.IsByRef)
 			{
-				if (type.GetGenericTypeDefinition() == typeof(Nullable<>))
-					return type.GetGenericArguments()[0].ToDebugString() + "?";
-				var tickIndex = type.Name.IndexOf('`');
-				return (type.Namespace == "System" ? "" : type.Namespace) +
-					"." + (tickIndex == -1 ? type.Name : type.Name.Substring(0, tickIndex)) +
-					"<" + type.GetGenericArguments().Select(genericTypeArg => genericTypeArg.ToDebugString()).Join() + ">";
+				// Assume this is a ParameterInfo.ParameterType, and that ParameterInfo.ToDebugString() already handles the ref/in/out serialization.
+				return type.GetElementType().ToDebugString();
 			}
-			if (type.IsPrimitive || type.IsArray)
+			if (type.IsPointer)
 			{
-				if (!ProviderTypeOutputCache.TryGetValue(type, out string str))
-				{
-					using (var provider = new CSharpCodeProvider())
-						str = provider.GetTypeOutput(new CodeTypeReference(type));
-					if (type.IsArray)
-						str = type.GetElementType().ToDebugString() + str.Substring(str.IndexOf('['));
-					ProviderTypeOutputCache.Add(type, str);
-				}
-				return str;
+				return type.GetElementType().ToDebugString() + "*";
 			}
-			if (type == typeof(void))
-				return "void";
-			if (type == typeof(object))
-				return "object";
-			if (type == typeof(string))
-				return "string";
-			if (type == typeof(decimal))
-				return "decimal";
-			if (type.Namespace == "System")
+			if (type.IsGenericParameter)
+			{
 				return type.Name;
-			return type.ToString().Split('+').Select(segment => segment[0] == '<' ? "'" + segment + "'" : segment).Join(delimiter: "/");
+			}
+			if (!TypeToDebugStringCache.TryGetValue(type, out string str))
+			{
+				if (type.IsArray)
+				{
+					var elementType = type;
+					do
+						elementType = elementType.GetElementType();
+					while (elementType.IsArray);
+					var bracketStr = type.Name.Substring(type.Name.IndexOf('[')).SplitKeepStringDelimiter("][", keepDelimiterIndex: 1).Reverse().Join("");
+					str = elementType.ToDebugString() + bracketStr;
+				}
+				else if (type.IsGenericType)
+				{
+					if (type.GetGenericTypeDefinition() == typeof(Nullable<>))
+					{
+						str = type.GetGenericArguments()[0].ToDebugString() + "?";
+					}
+					else
+					{
+						str = ToDebugStringTypeInternal(type, includeNamespace, includeDeclaringType);
+						var backTickIndex = str.IndexOf('`');
+						str = (backTickIndex == -1 ? str : str.Substring(0, backTickIndex)) +
+							"<" + type.GetGenericArguments().Select(genericTypeArg => genericTypeArg.ToDebugString()).Join() + ">";
+					}
+				}
+				else
+				{
+					str = ToDebugStringTypeInternal(type, includeNamespace, includeDeclaringType);
+				}
+				TypeToDebugStringCache.Add(type, str);
+			}
+			return str;
+		}
+
+		static string ToDebugStringTypeInternal(Type type, bool includeNamespace, bool includeDeclaringType)
+		{
+			return (!includeDeclaringType || type.DeclaringType is null ? "" : type.DeclaringType.ToDebugString() + "/") +
+				(!includeNamespace || type.Namespace == "System" ? "" : type.Namespace + ".") +
+				(type.Name.StartsWith("<") ? "'" + type.Name + "'" : type.Name);
 		}
 
 		public static string ToDebugString(this FieldInfo field)
@@ -174,9 +404,16 @@ namespace TranslationFilesGenerator.Tools
 			return method is null ? "null" :
 				(method.IsStatic ? "" : "instance ") +
 				(method is ConstructorInfo ? "void" : ((MethodInfo)method).ReturnType.ToDebugString()) + " " +
-				method.DeclaringType.ToDebugString() + "::" +
-				method.Name + "(" +
-				method.GetParameters().Select(parameter => parameter.ParameterType.ToDebugString()).Join() + ")";
+				method.DeclaringType.ToDebugString() + "::" + method.Name +
+				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString()).Join() + ")";
+		}
+
+		public static string ToDebugString(this ParameterInfo parameter)
+		{
+			return parameter is null ? "null" :
+				(parameter.IsDefined(typeof(ParamArrayAttribute), false) ? "params " :
+					(parameter.ParameterType.IsByRef ? (parameter.IsIn ? "in " : parameter.IsOut ? "out " : "ref ") : "")) +
+				parameter.ParameterType.ToDebugString() + " " + parameter.Name;
 		}
 	}
 }

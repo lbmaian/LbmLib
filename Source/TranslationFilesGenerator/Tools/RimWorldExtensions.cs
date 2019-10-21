@@ -7,7 +7,7 @@ namespace TranslationFilesGenerator.Tools
 {
 	public static class RimWorldLogging
 	{
-		public static readonly Action<string> RWLogger = str => Verse.Log.Message(str);
+		public static readonly Action<string> RWLogger = str => Log.Message(str);
 
 		public static readonly Action<string> UnityLogger = str => UnityEngine.Debug.Log(str);
 

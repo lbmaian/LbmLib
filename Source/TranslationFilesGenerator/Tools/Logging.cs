@@ -12,6 +12,7 @@ namespace TranslationFilesGenerator.Tools
 
 		public static Action<string> DefaultLogger = ConsoleLogger;
 
+		// TODO: Use a new interface that allows both object => string and T => string?
 		public static Func<object, string> DefaultToStringer = ObjectToStringer;
 
 		public static string SingleLineLabelDelimiter = ": ";

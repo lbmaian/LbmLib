@@ -296,7 +296,7 @@ namespace TranslationFilesGenerator
 			});
 			instructions.InsertRange(progressStrLoadIndex, newProgressStrInstructions);
 
-			//Logging.Log(instructions.ToDebugString(), "TranslationFilesCleaner_CleanupTranslationFiles_Patch3");
+			//Logging.Log(instructions, "TranslationFilesCleaner_CleanupTranslationFiles_Patch3");
 			return instructions;
 		}
 	}
@@ -340,7 +340,7 @@ namespace TranslationFilesGenerator
 			var resetToOriginalActiveLanguageMethod = typeof(TranslationFilesCleaner_DoCleanupTranslationFiles_Patch).GetMethod(nameof(ResetToOriginalActiveLanguage), AccessTools.all);
 			instructions.SafeInsert(getActiveLanguageFolderPathCallIndex + 1, new CodeInstruction(OpCodes.Call, resetToOriginalActiveLanguageMethod));
 
-			//Logging.Log(instructions.ToDebugString(), "TranslationFilesCleaner_DoCleanupTranslationFiles_Patch");
+			//Logging.Log(instructions, "TranslationFilesCleaner_DoCleanupTranslationFiles_Patch");
 			return instructions;
 		}
 
@@ -406,7 +406,7 @@ namespace TranslationFilesGenerator
 			// If the keyed translations folder doesn't exist, rather than erroring out like it originally does, create the folder instead,
 			// regardless of whether in Clean or GenerateForMod mode.
 			TranspilerSnippets.ReplaceFolderNotExistsErrorWithFolderCreate(instructions);
-			//Logging.Log(instructions.ToDebugString(), "TranslationFilesCleaner_CleanupKeyedTranslations_Patch(afterfolder)");
+			//Logging.Log(instructions, "TranslationFilesCleaner_CleanupKeyedTranslations_Patch(afterfolder)");
 
 			// Don't add english XComment if non-placeholder translation already exists.
 			// This is done by transforming the following code:
@@ -477,7 +477,7 @@ namespace TranslationFilesGenerator
 			// (and the added checks and english XComment code within the loop).
 			instructions.SafeInsertRange(englishValueNodeLoopStartIndex, tryStartToIsTranslatedStoreInstructions);
 
-			//Logging.Log(instructions.ToDebugString(), "TranslationFilesCleaner_CleanupKeyedTranslations_Patch(after)");
+			//Logging.Log(instructions, "TranslationFilesCleaner_CleanupKeyedTranslations_Patch(after)");
 			return instructions;
 		}
 	}
@@ -646,7 +646,7 @@ namespace TranslationFilesGenerator
 		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, MethodBase method, ILGenerator ilGenerator)
 		{
 			var instructions = instructionEnumerable.DeoptimizeLocalVarInstructions(method, ilGenerator).AsList();
-			//Logging.Log(instructions.ToDebugString(), "TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(before)");
+			//Logging.Log(instructions, "TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(before)");
 
 			// Need a DefInjectionPackage var for ModifyInjection.
 			// Initialize it to GetDefInjectionPackage(activeLanguage, defType).
@@ -687,7 +687,7 @@ namespace TranslationFilesGenerator
 				new CodeInstruction(OpCodes.Stloc_S, translationFileVar),
 			};
 			instructions.InsertRange(xDocumentVarStoreIndex + 1, translationFileVarInitInstructions);
-			//Logging.Log(instructions.ToDebugString(), "TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(aftervarinit)");
+			//Logging.Log(instructions, "TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(aftervarinit)");
 
 			// Skip first XComment since it's just the dummy <!--NEWLINE-->.
 			var searchStartIndex = xDocumentVarStoreIndex + 1 + translationFileVarInitInstructions.Length + 1;
@@ -735,7 +735,7 @@ namespace TranslationFilesGenerator
 
 			// TODO: Add mod setting to strip trailing whitespace on empty lines.
 
-			//Logging.Log(instructions.ToDebugString(), "TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(after)");
+			//Logging.Log(instructions, "TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(after)");
 			return instructions.ReoptimizeLocalVarInstructions();
 		}
 

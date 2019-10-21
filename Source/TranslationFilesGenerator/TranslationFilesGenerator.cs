@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Linq;
+﻿using System.Linq;
 using TranslationFilesGenerator.Tools;
 using Verse;
 
@@ -31,7 +30,7 @@ namespace TranslationFilesGenerator
 			ModContentPack = modContentPack;
 			TargetLanguage = targetLanguage;
 			OriginalActiveLanguage = LanguageDatabase.activeLanguage;
-			//Log.Message($"TranslationFilesGenerator.Begin: {ToString()}");
+			//Logging.Log(ToString(), "TranslationFilesGenerator.Begin");
 			// Note: LanguageDatabase.activeLanguage is only changed within DoCleanupTranslationFiles,
 			// so that confirmation dialogs and such are still translated in the current active language.
 			TranslationFilesCleaner.CleanupTranslationFiles();
@@ -39,8 +38,7 @@ namespace TranslationFilesGenerator
 
 		public static void End()
 		{
-			//Log.Message($"TranslationFilesGenerator.End: {ToString()}");
-
+			//Logging.Log(ToString(), "TranslationFilesGenerator.End");
 			var targetLanguage = TargetLanguage;
 			if (targetLanguage != OriginalActiveLanguage)
 			{
@@ -75,7 +73,7 @@ namespace TranslationFilesGenerator
 			activeLanguage.ResetDataAndErrors();
 			// InjectIntoData_AfterImpliedDefs does everything InjectIntoData_BeforeImpliedDefs does along with load error logging and backstory load/injections.
 			activeLanguage.InjectIntoData_AfterImpliedDefs();
-			//Log.Message($"Reload language {activeLanguage}");
+			//Logging.Log($"Reload language {activeLanguage}");
 		}
 
 		public static new string ToString()

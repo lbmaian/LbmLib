@@ -78,7 +78,7 @@
     <Compile Include="Tools\HarmonyTranspilerExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Tools\LanguageExtensions.cs" />
-    <Compile Include="Tools\Logger.cs" />
+    <Compile Include="Tools\Logging.cs" />
     <Compile Include="Tools\RimWorldExtensions.cs" />
     <Compile Include="TranslationFilesGenerator.cs" />
     <Compile Include="TranslationFilesGeneratorMod.cs" />
