@@ -1,15 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using NUnit.Framework;
 
 namespace TranslationFilesGenerator.Tools.Tests
 {
-	[TestClass]
+	[TestFixture]
 	public class DebugExtensionsTests
 	{
-		[ClassInitialize]
-		public static void ClassInitialize(TestContext _)
+		[OneTimeSetUp]
+		public static void SetUpOnce()
 		{
 			Logging.DefaultLogger = Logging.ConsoleLogger;
 		}
@@ -20,7 +20,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 			return null;
 		}
 
-		[TestMethod]
+		[Test]
 		public void ToDebugStringTest()
 		{
 			Assert.AreEqual("true", true.ToDebugString());
@@ -37,51 +37,49 @@ namespace TranslationFilesGenerator.Tools.Tests
 				GetType().GetMethod(nameof(TestMethodSignature)).ToDebugString());
 		}
 
-		[TestMethod]
+		[Test]
 		public void ToDebugStringTestEnumerable()
 		{
 			object obj = new[] { 1, 2, 3, 4 };
 			Assert.AreEqual("int[] { 1, 2, 3, 4 }", obj.ToDebugString());
 		}
 
-		[TestMethod]
+		[Test]
 		public void ToDebugStringTestC()
 		{
 			object obj = new TestC();
 			Assert.AreEqual("MyITestA", obj.ToDebugString());
 		}
 
-		[TestMethod]
+		[Test]
 		public void ToDebugStringTestD()
 		{
 			object obj = new TestD();
 			Assert.AreEqual("MyITestA", obj.ToDebugString());
 		}
 
-		[TestMethod]
-		[ExpectedException(typeof(AmbiguousMatchException))]
+		[Test]
 		public void ToDebugStringTestE()
 		{
 			object obj = new TestE();
-			obj.ToDebugString();
+			Assert.Throws<AmbiguousMatchException>(() => obj.ToDebugString());
 		}
 
-		[TestMethod]
+		[Test]
 		public void ToDebugStringTestF()
 		{
 			object obj = new TestF();
 			Assert.AreEqual("MyTestF", obj.ToDebugString());
 		}
 
-		[TestMethod]
-		[ExpectedException(typeof(AmbiguousMatchException))]
+		[Test]
 		public void ToDebugStringTestG()
 		{
 			object obj = new TestG();
-			obj.ToDebugString();
+			Assert.Throws<AmbiguousMatchException>(() => obj.ToDebugString());
 		}
 
-		[TestMethod]
+		[Test]
 		public void ToDebugStringTestH()
 		{
 			object obj = new TestH();
@@ -121,7 +119,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 			public string ToDebugString() => "MyTestH";
 		}
 
-		[TestMethod]
+		[Test]
 		public void ToDebugStringTestGenE()
 		{
 			object obj = new TestGenE<Type>();
@@ -152,7 +150,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 		{
 		}
 
-		[TestMethod]
+		[Test]
 		public void ToDebugStringTestCodeInstruction()
 		{
 			object obj = new[] { new Harmony.CodeInstruction(System.Reflection.Emit.OpCodes.Ret) };

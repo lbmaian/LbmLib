@@ -1,12 +1,12 @@
 ﻿using System.Collections.Generic;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using NUnit.Framework;
 
 namespace TranslationFilesGenerator.Tools.Tests
 {
-	[TestClass]
+	[TestFixture]
 	public class CollectionExtensionsTests
 	{
-		[TestMethod]
+		[Test]
 		public void FindIndexTest()
 		{
 			IList<int> list = new List<int>() { 1, 1, 2, 1, 2, 3, 1, 2, 3, 4, 1, 2, 3, 4, 5, 1, 2, 3, 3 };
@@ -23,7 +23,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 			Assert.AreEqual(-1, list.FindIndex(1, 1, x => x == 1, x => x == 2));
 		}
 
-		[TestMethod]
+		[Test]
 		public void FindLastIndexTest()
 		{
 			IList<int> list = new List<int>() { 1, 1, 2, 1, 2, 3, 1, 2, 3, 4, 1, 2, 3, 4, 5, 1, 2, 3, 3 };

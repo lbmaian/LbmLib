@@ -4,23 +4,23 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using Harmony;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using NUnit.Framework;
 
 namespace TranslationFilesGenerator.Tools.Tests
 {
-	[TestClass]
+	[TestFixture]
 	public class HarmonyTranspilerExtensionsTests
 	{
 		HarmonyInstance harmony;
 
-		[TestInitialize]
-		public void TestInitialize()
+		[SetUp]
+		public void SetUp()
 		{
 			harmony = HarmonyInstance.Create("HarmonyTranspilerExtensionsTests");
 		}
 
-		[TestCleanup]
-		public void TestCleanup()
+		[TearDown]
+		public void TearDown()
 		{
 			harmony.UnpatchAll(harmony.Id);
 		}
@@ -92,7 +92,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 			return instructions;
 		}
 
-		[TestMethod]
+		[Test]
 		public void AddTryFinallyTestVoidMethod1()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestTryFinallyTranspiler))));
@@ -104,7 +104,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 			}
 		}
 
-		[TestMethod]
+		[Test]
 		public void AddTryFinallyTestNonVoidMethod1()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleNonVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestTryFinallyTranspiler))));
@@ -131,7 +131,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 			return instructions;
 		}
 
-		[TestMethod]
+		[Test]
 		public void DeoptimizeLocalVarInstructionsTest()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestDeReOptimizeLocalVarTranspiler))));
