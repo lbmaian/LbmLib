@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using Verse;
@@ -15,7 +16,7 @@ namespace TranslationFilesGenerator.Tools
 		{
 			if (obj is string str)
 				return str;
-			if (obj is System.Collections.IEnumerable enumerable)
+			if (obj is IEnumerable enumerable)
 				return enumerable.ToStringSafeEnumerable();
 			return obj.ToStringSafe();
 		};

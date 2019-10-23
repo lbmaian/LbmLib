@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -11,6 +12,11 @@ namespace TranslationFilesGenerator.Tools
 		public static List<T> AsList<T>(this IEnumerable<T> enumerable)
 		{
 			return enumerable as List<T> ?? new List<T>(enumerable);
+		}
+
+		public static List<T> AsList<T>(this IEnumerable enumerable)
+		{
+			return enumerable as List<T> ?? new List<T>(enumerable.Cast<T>());
 		}
 
 		// XXX: Needs a better name.
@@ -90,7 +96,7 @@ namespace TranslationFilesGenerator.Tools
 			return removeCount;
 		}
 
-		public static string Join(this System.Collections.IEnumerable enumerable, string delimiter = ", ")
+		public static string Join(this IEnumerable enumerable, string delimiter = ", ")
 		{
 			var sb = new StringBuilder();
 			var first = true;
@@ -198,7 +204,7 @@ namespace TranslationFilesGenerator.Tools
 		}
 	}
 
-	public static class ListMethodsAsIListOrIEnumerableExtensions
+	public static class ListMethodsAsCollectionsInterfacesExtensions
 	{
 		public static ReadOnlyCollection<T> AsReadOnly<T>(this IList<T> list)
 		{

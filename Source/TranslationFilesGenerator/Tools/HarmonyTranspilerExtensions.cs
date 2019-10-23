@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -9,31 +10,188 @@ using Harmony.ILCopying;
 
 namespace TranslationFilesGenerator.Tools
 {
-	public static class HarmonyTranspilerExtensions
+	[AttributeUsage(AttributeTargets.Class)]
+	public class HarmonyDebugAttribute : Attribute
+	{
+	}
+
+	public sealed class HarmonyWithDebug : IDisposable
+	{
+		readonly bool origDebug;
+
+		public HarmonyWithDebug(bool debug = true)
+		{
+			origDebug = HarmonyInstance.DEBUG;
+			HarmonyInstance.DEBUG = debug;
+		}
+
+		public void Dispose()
+		{
+			HarmonyInstance.DEBUG = origDebug;
+		}
+	}
+
+	public static class HarmonyExtensions
+	{
+		const string HarmonyId = "HarmonyExtensions";
+
+		static HarmonyInstance HarmonyExt;
+
+		public static void PatchHarmony()
+		{
+			if (HarmonyExt is null)
+			{
+				HarmonyExt = HarmonyInstance.Create(HarmonyId);
+			}
+
+			var emitterFormatArgumentMethod = typeof(Emitter).GetMethod(nameof(Emitter.FormatArgument));
+			if (HarmonyExt.GetPatchInfo(emitterFormatArgumentMethod) is null)
+			{
+				HarmonyExt.Patch(emitterFormatArgumentMethod,
+					prefix: new HarmonyMethod(typeof(HarmonyExtensions).GetMethod(nameof(Emitter_FormatArgument_PrefixPatch), AccessTools.all)));
+			}
+
+			var emitterLogLocalVariableMethod = typeof(Emitter).GetMethod(nameof(Emitter.LogLocalVariable));
+			if (HarmonyExt.GetPatchInfo(emitterLogLocalVariableMethod) is null)
+			{
+				HarmonyExt.Patch(emitterLogLocalVariableMethod,
+					transpiler: new HarmonyMethod(typeof(HarmonyExtensions).GetMethod(nameof(Emitter_LogLocalVariable_TranspilerPatch), AccessTools.all)));
+			}
+
+			var harmonyInstancePatchAllMethod = typeof(HarmonyInstance).GetMethod(nameof(HarmonyInstance.PatchAll), new[] { typeof(Assembly) });
+			if (HarmonyExt.GetPatchInfo(harmonyInstancePatchAllMethod) is null)
+			{
+				HarmonyExt.Patch(harmonyInstancePatchAllMethod,
+					prefix: new HarmonyMethod(typeof(HarmonyExtensions).GetMethod(nameof(HarmonyInstance_PatchAll_PrefixPatch), AccessTools.all)));
+			}
+
+			var codeTranspilerConvertToGeneralInstructionsMethod = typeof(CodeTranspiler).GetMethod(nameof(CodeTranspiler.ConvertToGeneralInstructions));
+			if (HarmonyExt.GetPatchInfo(codeTranspilerConvertToGeneralInstructionsMethod) is null)
+			{
+				HarmonyExt.Patch(codeTranspilerConvertToGeneralInstructionsMethod,
+					prefix: new HarmonyMethod(typeof(HarmonyExtensions).GetMethod(nameof(CodeTranspiler_ConvertToGeneralInstructions_PrefixPatch), AccessTools.all)));
+			}
+
+			var codeTranspilerGetTranspilerCallParametersMethod = typeof(CodeTranspiler).GetMethod(nameof(CodeTranspiler.GetTranspilerCallParameters));
+			if (HarmonyExt.GetPatchInfo(codeTranspilerGetTranspilerCallParametersMethod) is null)
+			{
+				HarmonyExt.Patch(codeTranspilerGetTranspilerCallParametersMethod,
+					prefix: new HarmonyMethod(typeof(HarmonyExtensions).GetMethod(nameof(CodeTranspiler_GetTranspilerCallParameters_PrefixPatch), AccessTools.all)));
+			}
+		}
+
+		static bool Emitter_FormatArgument_PrefixPatch(ref string __result, object argument)
+		{
+			__result = HarmonyTranspilerDebugExtensions.OperandToDebugString(argument);
+			return false;
+		}
+
+		static IEnumerable<CodeInstruction> Emitter_LogLocalVariable_TranspilerPatch(IEnumerable<CodeInstruction> instructions)
+		{
+			var typeFullNameGetMethod = typeof(Type).GetProperty(nameof(Type.FullName)).GetGetMethod();
+			var toDebugStringMethod = typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(Type) });
+			foreach (var instruction in instructions)
+			{
+				if (instruction.opcode == OpCodes.Callvirt && instruction.operand == typeFullNameGetMethod)
+					instruction.SetTo(OpCodes.Call, toDebugStringMethod);
+				yield return instruction;
+			}
+		}
+
+		static bool HarmonyInstance_PatchAll_PrefixPatch(HarmonyInstance __instance, Assembly assembly)
+		{
+			assembly.GetTypes().Do(type =>
+			{
+				var parentMethodInfos = type.GetHarmonyMethods();
+				if (parentMethodInfos != null && parentMethodInfos.Count() > 0)
+				{
+					var info = HarmonyMethod.Merge(parentMethodInfos);
+					using (new HarmonyWithDebug(type.IsDefined(typeof(HarmonyDebugAttribute), false)))
+					{
+						var processor = new PatchProcessor(__instance, type, info);
+						processor.Patch();
+					}
+				}
+			});
+			return false;
+		}
+
+		static bool CodeTranspiler_ConvertToGeneralInstructions_PrefixPatch(ref IEnumerable __result,
+			MethodInfo transpiler, IEnumerable enumerable, out Dictionary<object, Dictionary<string, object>> unassignedValues)
+		{
+			var type = transpiler.GetParameters()
+				.Select(p => p.ParameterType)
+				.FirstOrDefault(t => t.IsGenericType && t.GetGenericTypeDefinition().Name is var name &&
+					(name.StartsWith("IEnumerable", StringComparison.Ordinal) || name.StartsWith("ICollection", StringComparison.Ordinal) ||
+					name.StartsWith("IList", StringComparison.Ordinal) || name.StartsWith("List", StringComparison.Ordinal)));
+			__result = CodeTranspiler.ConvertInstructionsAndUnassignedValues(type, enumerable, out unassignedValues);
+			return false;
+		}
+
+		static bool CodeTranspiler_GetTranspilerCallParameters_PrefixPatch(ref List<object> __result,
+			ILGenerator generator, MethodInfo transpiler, MethodBase method, IEnumerable instructions)
+		{
+			var parameters = new List<object>();
+			var instructionType = instructions.GetType().GetGenericArguments()[0];
+			var transpilerContextType = typeof(TranspilerContext<>).MakeGenericType(instructionType);
+			transpiler.GetParameters().Select(param => param.ParameterType).Do(type =>
+			{
+				if (type.IsAssignableFrom(typeof(ILGenerator)))
+					parameters.Add(generator);
+				else if (type.IsAssignableFrom(typeof(MethodBase)))
+					parameters.Add(method);
+				else if (type == transpilerContextType)
+				{
+					var transpilerContextConstructor = transpilerContextType.GetConstructor(new[] { typeof(ILGenerator), typeof(MethodBase), typeof(IEnumerable) });
+					parameters.Add(transpilerContextConstructor.Invoke(new object[] { generator, method, instructions }));
+				}
+				else
+					parameters.Add(instructions);
+			});
+			__result = parameters;
+			return false;
+		}
+	}
+
+	public class TranspilerContext<T>
+	{
+		public readonly ILGenerator Generator;
+		public readonly MethodBase Method;
+		public readonly List<T> Instructions;
+
+		public TranspilerContext(ILGenerator generator, MethodBase method, IEnumerable instructions) :
+			this(generator, method, instructions.AsList<T>())
+		{
+		}
+
+		public TranspilerContext(ILGenerator generator, MethodBase method, List<T> instructions)
+		{
+			Generator = generator;
+			Method = method;
+			Instructions = instructions;
+		}
+	}
+
+	public static class HarmonyTranspilerDebugExtensions
 	{
 		// Certain CodeInstruction operands aren't being formatted well in CodeInstruction.ToString, so provide a better version.
 		public static string ToDebugString(this CodeInstruction instruction)
 		{
 			if (instruction is null)
 				return "null";
-			var operandStr = OperandToDebugString(instruction.operand, instruction.opcode);
-			if (operandStr.Length != 0)
-				operandStr = " " + operandStr;
+			var opcode = instruction.opcode;
+			var operand = instruction.operand;
+			var operandStr = operand is null && opcode.OperandType == OperandType.InlineNone ? "" : " " + OperandToDebugString(operand);
 			var extrasStr = Enumerable.Concat(instruction.labels.Select(label => label.ToDebugString()), instruction.blocks.Select(block => block.ToDebugString())).Join();
 			if (extrasStr.Length != 0)
 				extrasStr = " [" + extrasStr + "]";
-			return instruction.opcode.ToString() + operandStr + extrasStr;
+			return opcode.ToString() + operandStr + extrasStr;
 		}
 
-		static string OperandToDebugString(object operand, OpCode opcode)
+		internal static string OperandToDebugString(object operand)
 		{
 			if (operand is null)
-			{
-				if (opcode.OperandType == OperandType.InlineNone)
-					return "";
-				else
-					return "null";
-			}
+				return "null";
 			else if (operand is string str)
 				return '"' + str + '"';
 			else if (operand is Label label)
@@ -125,7 +283,10 @@ namespace TranslationFilesGenerator.Tools
 				new CodeInstruction(popStack ? OpCodes.Pop : OpCodes.Nop),
 			};
 		}
+	}
 
+	public static class HarmonyTranspilerExtensions
+	{
 		public static void SafeInsert(this IList<CodeInstruction> instructions, int index, CodeInstruction newInstruction)
 		{
 			var origInstruction = instructions[index];
@@ -314,9 +475,23 @@ namespace TranslationFilesGenerator.Tools
 			// Mark start of the try block.
 			methodInstructions[tryStartIndex].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock, null));
 
+			// It's possible for a method to end in a tail call with no ret. To simplify the analysis done in ConvertToLeaveInstructions,
+			// if the last instruction is a tail call and the finally block will be inserted at the end of the method, insert a ret at the end of the method.
+			if (finallyInsertIndex == instructionCount && instructionCount >= 2)
+			{
+				var lastInstructionOpcode = methodInstructions[instructionCount - 1].opcode;
+				if ((lastInstructionOpcode == OpCodes.Call || lastInstructionOpcode == OpCodes.Callvirt || lastInstructionOpcode == OpCodes.Calli) &&
+					methodInstructions[instructionCount - 2].opcode == OpCodes.Tailcall)
+				{
+					methodInstructions.Add(new CodeInstruction(OpCodes.Ret));
+					finallyInsertIndex++;
+					// Note: instructionCount is not used after this, so no need to increment it.
+				}
+			}
+
 			// Convert ret instructions in the try block into leave instructions to a final ret at the end of the method
 			// (and thus also after the finally block instructions) with additional return value tracking if method has return type.
-			ConvertToLeaveInstructions(methodInstructions, method, ilGenerator, tryStartIndex, ref finallyInsertIndex, OpCodes.Ret, allowReturnValueTracking: true);
+				ConvertToLeaveInstructions(methodInstructions, method, ilGenerator, tryStartIndex, ref finallyInsertIndex, OpCodes.Ret, allowReturnValueTracking: true);
 
 			// Convert jmp instructions in the try block into leave instructions to a final jmp at the end of the method.
 			ConvertToLeaveInstructions(methodInstructions, method, ilGenerator, tryStartIndex, ref finallyInsertIndex, OpCodes.Jmp, allowReturnValueTracking: false);

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -14,6 +15,16 @@ namespace TranslationFilesGenerator.Tools
 
 	public static class DebugExtensions
 	{
+		// The following is all a workaround for C# extension methods not supporting late binding for function overload resolution:
+		// Specifically, use a custom dynamic dispatch algorithm in static string ToDebugString(this object obj).
+		// This is not a full-featured single parameter function overload resolution algorithm but it suffices for most uses cases.
+		// (For example, doesn't account for generic type contravariance or other generic type constraints.)
+		// The actual function overload resolution algorithm is documented here:
+		// https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/expressions#overload-resolution
+		// Also note that using dynamic type wouldn't work, since:
+		// a) dynamic type doesn't work with extension methods; and
+		// b) dynamic type isn't supported in .NET 3.5 (and thus legacy Unity apps) anyway.
+
 		struct DynamicDispatchEntry
 		{
 			public readonly Type Type;
@@ -140,12 +151,6 @@ namespace TranslationFilesGenerator.Tools
 			return new DynamicDispatchEntry(type, method, @delegate);
 		}
 
-		// Workaround for C# extension methods not supporting late binding for function overload resolution:
-		// Use a custom dynamic dispatch algorithm.
-		// This is not a full-featured single parameter function overload resolution algorithm but it suffices for most uses cases.
-		// (For example, doesn't account for generic type contravariance or other generic type constraints.)
-		// The actual function overload resolution algorithm is documented here:
-		// https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/expressions#overload-resolution
 		public static string ToDebugString(this object obj)
 		{
 			if (obj is null)
@@ -297,7 +302,7 @@ namespace TranslationFilesGenerator.Tools
 			return str;
 		}
 
-		public static string ToDebugString(this System.Collections.IEnumerable enumerable)
+		public static string ToDebugString(this IEnumerable enumerable)
 		{
 			if (enumerable is null)
 				return "null";
@@ -403,7 +408,7 @@ namespace TranslationFilesGenerator.Tools
 		{
 			return method is null ? "null" :
 				(method.IsStatic ? "" : "instance ") +
-				(method is ConstructorInfo ? "void" : ((MethodInfo)method).ReturnType.ToDebugString()) + " " +
+				(method is MethodInfo methodInfo ? methodInfo.ReturnType.ToDebugString() : "void") + " " +
 				method.DeclaringType.ToDebugString() + "::" + method.Name +
 				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString()).Join() + ")";
 		}

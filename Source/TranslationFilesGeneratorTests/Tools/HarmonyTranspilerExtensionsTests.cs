@@ -13,26 +13,6 @@ namespace TranslationFilesGenerator.Tools.Tests
 	{
 		HarmonyInstance harmony;
 
-		// TODO: Generalize this into a class in Logger.cs?
-		class ListLogger : IDisposable
-		{
-			readonly Action<string> origLogger;
-
-			public readonly List<string> List;
-
-			public ListLogger()
-			{
-				origLogger = Logging.DefaultLogger;
-				List = new List<string>();
-				Logging.DefaultLogger = str => List.Add(str);
-			}
-
-			public void Dispose()
-			{
-				Logging.DefaultLogger = origLogger;
-			}
-		}
-
 		[TestInitialize]
 		public void TestInitialize()
 		{
@@ -106,7 +86,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 		{
 			var instructions = instructionEnumerable.AsList();
 			instructions.ToDebugString().Log("before");
-			instructions.AddTryFinally(method, ilGenerator, HarmonyTranspilerExtensions.StringLogInstructions("hello world"));
+			instructions.AddTryFinally(method, ilGenerator, HarmonyTranspilerDebugExtensions.StringLogInstructions("hello world"));
 			instructions.ToDebugString().Log("after");
 			
 			return instructions;
@@ -116,10 +96,11 @@ namespace TranslationFilesGenerator.Tools.Tests
 		public void AddTryFinallyTestVoidMethod1()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestTryFinallyTranspiler))));
-			using (var listLogger = new ListLogger())
+			var list = new List<string>();
+			using (Logging.With(x => list.Add(x)))
 			{
 				SampleVoidMethod(new[] { 1, 2, 3, 4 }, x => Logging.Log(x));
-				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, listLogger.List);
+				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, list);
 			}
 		}
 
@@ -127,10 +108,11 @@ namespace TranslationFilesGenerator.Tools.Tests
 		public void AddTryFinallyTestNonVoidMethod1()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleNonVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestTryFinallyTranspiler))));
-			using (var listLogger = new ListLogger())
+			var list = new List<string>();
+			using (Logging.With(x => list.Add(x)))
 			{
 				Assert.AreEqual(100, SampleNonVoidMethod(new[] { 1, 2, 3, 4 }, x => Logging.Log(x)));
-				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, listLogger.List);
+				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, list);
 			}
 		}
 
@@ -144,7 +126,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 			instructions.ReoptimizeLocalVarInstructions();
 			instructions.ToDebugString().Log("after reoptimize");
 			CollectionAssert.AreEqual(origInstructions, instructions);
-			instructions.SafeInsertRange(instructions.Count - 1, HarmonyTranspilerExtensions.StringLogInstructions("hello world"));
+			instructions.SafeInsertRange(instructions.Count - 1, HarmonyTranspilerDebugExtensions.StringLogInstructions("hello world"));
 			instructions.ToDebugString().Log("after");
 			return instructions;
 		}
@@ -153,10 +135,11 @@ namespace TranslationFilesGenerator.Tools.Tests
 		public void DeoptimizeLocalVarInstructionsTest()
 		{
 			harmony.Patch(GetType().GetMethod(nameof(SampleVoidMethod)), transpiler: new HarmonyMethod(GetType().GetMethod(nameof(TestDeReOptimizeLocalVarTranspiler))));
-			using (var listLogger = new ListLogger())
+			var list = new List<string>();
+			using (Logging.With(x => list.Add(x)))
 			{
 				SampleVoidMethod(new[] { 1, 2, 3, 4 }, x => Logging.Log(x));
-				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, listLogger.List);
+				CollectionAssert.AreEqual(new[] { "1", "2", "3", "c", "hello world" }, list);
 			}
 		}
 	}

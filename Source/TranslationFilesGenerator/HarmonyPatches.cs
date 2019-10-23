@@ -24,7 +24,8 @@ namespace TranslationFilesGenerator
 			//Logging.DefaultToStringer = RimWorldLogging.RWToStringer;
 			Logging.DefaultToStringer = DebugLogging.ToDebugStringer;
 
-			HarmonyInstance harmony = HarmonyInstance.Create("rimworld.translation_files_generator");
+			HarmonyExtensions.PatchHarmony();
+			HarmonyInstance harmony = HarmonyInstance.Create("RimWorld.TranslationFilesGenerator");
 			harmony.PatchAll();
 		}
 	}
@@ -90,14 +91,9 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(MainMenuDrawer), "DoTranslationInfoRect")]
 	static class MainMenuDrawer_DoTranslationInfoRect_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, ILGenerator ilGenerator)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions, ILGenerator ilGenerator)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			// Skip the "activeLanguage != defaultLanguage" check.
 			// Fortunately, this happens at the very start and doesn't involve any variables, so just remove the front few instructions.
 			var firstReturnIndex = instructions.FindIndex(OpCodes.Ret.AsInstructionPredicate());
@@ -157,14 +153,9 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(MainMenuDrawer), "MainMenuOnGUI")]
 	static class MainMenuDrawer_MainMenuOnGUI_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			// Increase translation info rect width by 40 to fit the new "Generate translation files for mod" button text.
 			var translationInfoRectConstructorIndex = instructions.FindLastIndex(
 				OpCodes.Call.AsInstructionPredicate(typeof(Rect).GetConstructor(new[] { typeof(float), typeof(float), typeof(float), typeof(float) })));
@@ -178,14 +169,9 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "CleanupTranslationFiles")]
 	static class TranslationFilesCleaner_CleanupTranslationFiles_Patch1
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, ILGenerator ilGenerator)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions, ILGenerator ilGenerator)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			// Now that "activeLanguage == defaultLanguage" is possible, in TranslationFilesMode.Clean mode (when the check is made, see below),
 			// show a message indicating the error ala LanguageReportGenerator.
 			var firstReturnIndex = instructions.FindIndex(OpCodes.Ret.AsInstructionPredicate());
@@ -215,9 +201,6 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "CleanupTranslationFiles")]
 	static class TranslationFilesCleaner_CleanupTranslationFiles_Patch2
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTargetMethod]
 		static MethodInfo CalculateMethod(HarmonyInstance harmony)
 		{
@@ -227,10 +210,8 @@ namespace TranslationFilesGenerator
 		}
 
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			var findGetWindowStackCallIndex = instructions.FindLastIndex(OpCodes.Call.AsInstructionPredicate(typeof(Find).GetProperty(nameof(Find.WindowStack)).GetGetMethod()));
 			instructions.InsertRange(findGetWindowStackCallIndex, new[]
 			{
@@ -260,9 +241,6 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "CleanupTranslationFiles")]
 	static class TranslationFilesCleaner_CleanupTranslationFiles_Patch3
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTargetMethod]
 		static MethodInfo CalculateMethod(HarmonyInstance harmony)
 		{
@@ -272,10 +250,8 @@ namespace TranslationFilesGenerator
 		}
 
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, ILGenerator ilGenerator)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions, ILGenerator ilGenerator)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			var progressStrLoadIndex = instructions.FindIndex(OpCodes.Ldstr.AsInstructionPredicate("CleaningTranslationFiles"));
 			var afterProgressStrLoadIndex = progressStrLoadIndex + 1;
 
@@ -304,9 +280,6 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "DoCleanupTranslationFiles")]
 	static class TranslationFilesCleaner_DoCleanupTranslationFiles_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyPrefix]
 		static void Prefix()
 		{
@@ -325,10 +298,8 @@ namespace TranslationFilesGenerator
 		}
 
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			// Skip the "activeLanguage != defaultLanguage" check. Even in TranslationFilesMode.Clean mode, the check is redundant.
 			// Fortunately, this happens at the very start and doesn't involve any variables, so just remove the front few instructions.
 			var firstReturnIndex = instructions.FindIndex(OpCodes.Ret.AsInstructionPredicate());
@@ -377,14 +348,9 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "CleanupKeyedTranslations")]
 	static class TranslationFilesCleaner_CleanupKeyedTranslations_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, ILGenerator ilGenerator)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions, ILGenerator ilGenerator)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			// Not including a TranslationFilesMode check, since we do want to allow GenerateForMod mode for keyed translations for other languages,
 			// and only want to exclude the case where activeLanguage and defaultLanguage are the same (as below).
 
@@ -485,14 +451,9 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "CleanupBackstories")]
 	static class TranslationFilesCleaner_CleanupBackstories_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, ILGenerator ilGenerator)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions, ILGenerator ilGenerator)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			// Add a TranslationFilesMode check to skip backstory translations in GenerateForMod mode.
 			// This is necessary because mods (except the Core mod) are not allowed to define backstories the vanilla way.
 			// (Instead, there are various other mod implementations that typically involve defining backstories via a custom Def type.)
@@ -509,9 +470,6 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "<GetLanguageCoreModFolderPath>m__C")]
 	static class TranslationFilesCleaner_GetLanguageCoreModFolderPath_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyPrefix]
 		static bool Prefix(ModContentPack x, ref bool __result)
 		{
@@ -527,14 +485,9 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "CleanupDefInjections")]
 	static class TranslationFilesCleaner_CleanupDefInjections_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			// If the def-injected folder doesn't exist, rather than erroring out like it originally does, create the folder instead,
 			// regardless of whether in Clean or GenerateForMod mode.
 			TranspilerSnippets.ReplaceFolderNotExistsErrorWithFolderCreate(instructions);
@@ -571,14 +524,9 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(DefInjectionUtility), "ForEachPossibleDefInjection")]
 	static class DefInjectionUtility_ForEachPossibleDefInjection_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			// Redirect call to GenDefDatabase.GetAllDefsInDatabaseForDef to our own AllDefsInModOfType.
 			var getAllDefsInDatabaseForDefCallInstruction = instructions.Find(
 				OpCodes.Call.AsInstructionPredicate(typeof(GenDefDatabase).GetMethod(nameof(GenDefDatabase.GetAllDefsInDatabaseForDef))));
@@ -599,9 +547,6 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch]
 	static class LoadedLanguage_FolderPaths_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTargetMethod]
 		static MethodInfo CalculateMethod(HarmonyInstance harmony)
 		{
@@ -611,10 +556,8 @@ namespace TranslationFilesGenerator
 		}
 
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions)
 		{
-			var instructions = instructionEnumerable.AsList();
-
 			var getRunningModsCallInstruction = instructions.Find(
 				OpCodes.Call.AsInstructionPredicate(typeof(LoadedModManager).GetProperty(nameof(LoadedModManager.RunningMods)).GetGetMethod()));
 			getRunningModsCallInstruction.operand = typeof(LoadedLanguage_FolderPaths_Patch).GetMethod(nameof(GetMods), AccessTools.all);
@@ -639,13 +582,10 @@ namespace TranslationFilesGenerator
 	[HarmonyPatch(typeof(TranslationFilesCleaner), "CleanupDefInjectionsForDefType")]
 	static class TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTranspiler]
-		static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructionEnumerable, MethodBase method, ILGenerator ilGenerator)
+		static IEnumerable<CodeInstruction> Transpiler(List<CodeInstruction> instructions, MethodBase method, ILGenerator ilGenerator)
 		{
-			var instructions = instructionEnumerable.DeoptimizeLocalVarInstructions(method, ilGenerator).AsList();
+			instructions = instructions.DeoptimizeLocalVarInstructions(method, ilGenerator).AsList();
 			//Logging.Log(instructions, "TranslationFilesCleaner_CleanupDefInjectionsForDefType_Patch(before)");
 
 			// Need a DefInjectionPackage var for ModifyInjection.
@@ -816,7 +756,8 @@ namespace TranslationFilesGenerator
 					{
 						instructions[englishListVarLoadIndex].Clone(),
 						new CodeInstruction(OpCodes.Call,
-							typeof(Tools.CollectionExtensions).GetMethod(nameof(Tools.CollectionExtensions.AsList), AccessTools.all).MakeGenericMethod(typeof(string))),
+							typeof(Tools.CollectionExtensions).GetMethod(nameof(Tools.CollectionExtensions.AsList), new[] { typeof(IEnumerable<string>) })
+								.MakeGenericMethod(typeof(string))),
 						new CodeInstruction(OpCodes.Ldnull), // comments
 						new CodeInstruction(OpCodes.Call, typeof(DefInjectionPackage).GetMethod("TryAddFullListInjection", AccessTools.all)),
 					});
@@ -824,7 +765,8 @@ namespace TranslationFilesGenerator
 				else
 				{
 					// Get injection, then call defInjectionPackage.TryAddInjection(translationFile, normalizedPath, englishStr).
-					var englishStrVarLoadIndex = instructions.FindLastIndex(xCommentConstructIndex - 1, OpCodes.Ldloc_S.AsInstructionPredicate().LocalBuilder(typeof(string)));
+					var englishStrVarLoadIndex = instructions.FindLastIndex(xCommentConstructIndex - 1,
+						OpCodes.Ldloc_S.AsInstructionPredicate().LocalBuilder(typeof(string)));
 					//Logging.Log(instructions.ItemToDebugString(englishStrVarLoadIndex), "englishStrVarLoadIndex");
 					newInstructions.AddRange(new[]
 					{
@@ -912,9 +854,6 @@ namespace TranslationFilesGenerator
 	//[HarmonyPatch]
 	static class TranslationFilesCleaner_CleanupDefInjectionsForDefType_Debug_Patch
 	{
-		//static bool Prepare() { HarmonyInstance.DEBUG = true; return true; } // note: [HarmonyPrepare] is currently broken, so using specific named method approach
-		//static void Cleanup() { HarmonyInstance.DEBUG = false; }
-
 		[HarmonyTargetMethod]
 		static MethodInfo CalculateMethod(HarmonyInstance harmony)
 		{

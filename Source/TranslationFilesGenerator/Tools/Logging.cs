@@ -19,6 +19,39 @@ namespace TranslationFilesGenerator.Tools
 
 		public static string MultiLineLabelDelimiter = ":\n\t";
 
+		sealed class WithObject : IDisposable
+		{
+			readonly Action<string> origLogger;
+			readonly Func<object, string> origToStringer;
+
+			public WithObject(Action<string> logger, Func<object, string> toStringer)
+			{
+				if (!(logger is null))
+				{
+					origLogger = DefaultLogger;
+					DefaultLogger = logger ?? DefaultLogger;
+				}
+				if (!(toStringer is null))
+				{
+					origToStringer = DefaultToStringer;
+					DefaultToStringer = toStringer ?? DefaultToStringer;
+				}
+			}
+
+			public void Dispose()
+			{
+				if (!(origLogger is null))
+					DefaultLogger = origLogger;
+				if (!(origToStringer is null))
+					DefaultToStringer = origToStringer;
+			}
+		}
+
+		public static IDisposable With(Action<string> logger = null, Func<object, string> toStringer = null)
+		{
+			return new WithObject(logger, toStringer);
+		}
+
 		// Note: The <T> is redundant here in C#, but when generating CIL that calls this method,
 		// it does away with the callee potentially needing to check whether input obj is a value type and thus needs boxing.
 		public static void Log<T>(this T obj, string label = "", string labelDelimiter = null, Action<string> logger = null, Func<object, string> toStringer = null)
