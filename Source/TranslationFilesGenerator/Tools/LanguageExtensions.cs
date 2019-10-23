@@ -3,6 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace TranslationFilesGenerator.Tools
@@ -797,7 +800,7 @@ namespace TranslationFilesGenerator.Tools
 		}
 	}
 
-	public static class TypeExtensions
+	public static class ReflectionExtensions
 	{
 		public static IEnumerable<Type> GetParentTypes(this Type type, bool includeThisType = false)
 		{
@@ -812,6 +815,354 @@ namespace TranslationFilesGenerator.Tools
 			{
 				yield return type;
 				type = type.BaseType;
+			}
+		}
+
+		sealed class PartialApplyClosure
+		{
+			public readonly object[] FixedNonConstantArguments;
+
+			internal static readonly Dictionary<MethodBase, uint> CountByMethod = new Dictionary<MethodBase, uint>();
+			internal static readonly ConditionalWeakTable<MethodBase, PartialApplyClosure> Closures = new ConditionalWeakTable<MethodBase, PartialApplyClosure>();
+
+			internal static readonly MethodInfo GetCurrentMethodMethod = typeof(MethodBase).GetMethod(nameof(MethodBase.GetCurrentMethod));
+			internal static readonly MethodInfo ConditionalWeakTableTryGetValueMethod = typeof(ConditionalWeakTable<MethodBase, PartialApplyClosure>).GetMethod("TryGetValue");
+			internal static readonly FieldInfo ClosuresField = typeof(PartialApplyClosure).GetField(nameof(Closures));
+			internal static readonly FieldInfo NonConstantArgumentsField = typeof(PartialApplyClosure).GetField(nameof(FixedNonConstantArguments));
+
+			internal PartialApplyClosure(object[] fixedNonConstantArguments)
+			{
+				FixedNonConstantArguments = fixedNonConstantArguments;
+			}
+		}
+
+		public static MethodInfo DynamicPartialApply(this MethodInfo method, params object[] fixedArguments)
+		{
+			// Note: partialApplyCount is only used for the generated method name. The name doesn't have to be unique, but it's nice for debugging purposes.
+			if (!PartialApplyClosure.CountByMethod.TryGetValue(method, out var partialApplyCount))
+				partialApplyCount = 0;
+			else if (partialApplyCount > uint.MaxValue)
+				partialApplyCount = 0;
+
+			var parameters = method.GetParameters();
+			var totalArgumentCount = parameters.Length;
+			var fixedArgumentCount = fixedArguments.Length;
+			var nonFixedArgumentCount = totalArgumentCount - fixedArgumentCount;
+			var nonFixedParameterTypes = new Type[nonFixedArgumentCount];
+			var returnType = method.ReturnType;
+			var isStatic = method.IsStatic;
+
+			var index = (short)0;
+			while (index < fixedArgumentCount)
+			{
+				var parameterType = parameters[index].ParameterType;
+				if (parameterType.IsByRef)
+					throw new ArgumentException("Cannot partial apply with a fixed argument passed by reference (including in and out arguments): " + parameters[index]);
+				index++;
+			}
+			while (index < totalArgumentCount)
+			{
+				nonFixedParameterTypes[index - fixedArgumentCount] = parameters[index].ParameterType;
+				index++;
+			}
+
+			var dynamicMethod = new DynamicMethod(
+				method.Name + "_PartialApply_" + partialApplyCount,
+				method.Attributes,
+				method.CallingConvention,
+				returnType,
+				nonFixedParameterTypes,
+				method.DeclaringType,
+				skipVisibility: true);
+			for (index = 0; index < nonFixedArgumentCount; index++)
+			{
+				var parameter = parameters[index];
+				dynamicMethod.DefineParameter(index, parameter.Attributes, parameter.Name);
+				// XXX: Do any custom attributes like ParamArrayAttribute need to be copied too?
+				// There's no good generic way to copy attributes as far as I can tell, since CustomAttributeBuilder is very cumbersome to use.
+			}
+			var ilGenerator = dynamicMethod.GetILGenerator();
+
+			var closure = default(PartialApplyClosure);
+			var fixedNonConstantArgumentsVar = default(LocalBuilder);
+			var fixedNonConstantArgumentCount = fixedArguments.Count(CanEmitConstant);
+			if (fixedNonConstantArgumentCount > 0)
+			{
+				// Create the closure (will be registered with PartialApplyClosure.Closures with dynamicMethod at the very end,
+				// since it's possible that an exception could be thrown throughout this PartialApply method).
+				closure = new PartialApplyClosure(new object[fixedNonConstantArgumentCount]);
+
+				// Emit the code that loads the closure from PartialApplyClosure.ClosuresField, and then its FixedNonConstantArguments into a local variable.
+				var closureVar = ilGenerator.DeclareLocal(typeof(PartialApplyClosure));
+				fixedNonConstantArgumentsVar = ilGenerator.DeclareLocal(typeof(object[]));
+				ilGenerator.Emit(OpCodes.Ldfld, PartialApplyClosure.ClosuresField);
+				ilGenerator.Emit(OpCodes.Call, PartialApplyClosure.GetCurrentMethodMethod);
+				ilGenerator.EmitLdloca(closureVar);
+				ilGenerator.Emit(OpCodes.Call, PartialApplyClosure.ConditionalWeakTableTryGetValueMethod);
+				ilGenerator.Emit(OpCodes.Pop); // throw away returned bool
+				ilGenerator.EmitLdloc(closureVar);
+				ilGenerator.Emit(OpCodes.Ldfld, PartialApplyClosure.NonConstantArgumentsField);
+				ilGenerator.EmitStloc(fixedNonConstantArgumentsVar);
+			}
+
+			if (isStatic)
+			{
+				ilGenerator.Emit(OpCodes.Ldarg_0);
+			}
+
+			var fixedNonConstantArgumentIndex = 0;
+			for (index = 0; index < fixedArgumentCount; index++)
+			{
+				var fixedArgument = fixedArguments[index];
+				if (!ilGenerator.TryEmitConstant(fixedArgument))
+				{
+					// Need the closure at this point to obtain the fixed non-constant arguments.
+					var fixedArgumentType = fixedArgument.GetType();
+					ilGenerator.EmitLdloc(fixedNonConstantArgumentsVar);
+					ilGenerator.EmitLdcI4(fixedNonConstantArgumentIndex);
+					// PartialApplyClosure.NonConstantArgumentsField is an array of objects, so each element of it needs to be accessed by reference,
+					// and if argument is supposed to be a value type, unbox it.
+					ilGenerator.Emit(OpCodes.Ldelem_Ref);
+					if (fixedArgumentType.IsValueType)
+						ilGenerator.Emit(OpCodes.Unbox_Any, fixedArgumentType);
+					fixedNonConstantArgumentIndex++;
+				}
+			}
+
+			var prefixArgumentCount = (short)((isStatic ? 1 : 0) + (fixedNonConstantArgumentCount > 0 ? 1 : 0));
+			index = prefixArgumentCount;
+			nonFixedArgumentCount += prefixArgumentCount;
+			while (index < nonFixedArgumentCount)
+			{
+				ilGenerator.EmitLdarg(index);
+				index++;
+			}
+
+			if (isStatic || method.IsFinal)
+			{
+				ilGenerator.Emit(OpCodes.Call, method);
+			}
+			else
+			{
+				// The constrained prefix instruction handles boxing for value types as needed.
+				ilGenerator.Emit(OpCodes.Constrained);
+				ilGenerator.Emit(OpCodes.Callvirt, method);
+			}
+
+			if (returnType != typeof(void) && returnType.IsValueType)
+			{
+				ilGenerator.Emit(OpCodes.Box, returnType);
+			}
+			ilGenerator.Emit(OpCodes.Ret);
+
+			Harmony.DynamicTools.PrepareDynamicMethod(dynamicMethod);
+
+			PartialApplyClosure.CountByMethod.Add(method, partialApplyCount + 1);
+			if (!(closure is null))
+				PartialApplyClosure.Closures.Add(dynamicMethod, closure);
+			return dynamicMethod;
+		}
+
+		// TODO: Following should be public extension methods somewhere?
+
+		static bool CanEmitConstant(object argument)
+		{
+			if (argument is null)
+				return true;
+			switch (Type.GetTypeCode(argument.GetType()))
+			{
+			case TypeCode.Boolean:
+			case TypeCode.SByte:
+			case TypeCode.Int16:
+			case TypeCode.Int32:
+			case TypeCode.Char:
+			case TypeCode.Byte:
+			case TypeCode.UInt16:
+			case TypeCode.UInt32:
+			case TypeCode.Int64:
+			case TypeCode.UInt64:
+			case TypeCode.Single:
+			case TypeCode.Double:
+			case TypeCode.String:
+				return true;
+			}
+			return false;
+		}
+
+		static bool TryEmitConstant(this ILGenerator ilGenerator, object argument)
+		{
+			if (argument is null)
+			{
+				ilGenerator.Emit(OpCodes.Ldnull);
+				return true;
+			}
+			switch (Type.GetTypeCode(argument.GetType()))
+			{
+			case TypeCode.Boolean:
+				ilGenerator.Emit((bool)argument ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0);
+				return true;
+			// Apparently don't need to handle signed and unsigned integer types of size 4 bytes or less differently from each other.
+			case TypeCode.SByte:
+			case TypeCode.Int16:
+			case TypeCode.Int32:
+			case TypeCode.Char:
+			case TypeCode.Byte:
+			case TypeCode.UInt16:
+			case TypeCode.UInt32:
+				ilGenerator.EmitLdcI4((int)argument);
+				return true;
+			// Likewise, ulong and long don't have to be treated differently, but if ldc.i4* is used, needs a conv.i8 afterwards.
+			case TypeCode.Int64:
+			case TypeCode.UInt64:
+				var longArgument = (long)argument;
+				if (longArgument >= int.MinValue && longArgument <= int.MaxValue)
+				{
+					ilGenerator.EmitLdcI4((int)longArgument);
+					ilGenerator.Emit(OpCodes.Conv_I8);
+				}
+				else
+				{
+					ilGenerator.Emit(OpCodes.Ldc_I8, longArgument);
+				}
+				return true;
+			case TypeCode.Single:
+				ilGenerator.Emit(OpCodes.Ldc_R4, (float)argument);
+				return true;
+			case TypeCode.Double:
+				ilGenerator.Emit(OpCodes.Ldc_R8, (double)argument);
+				return true;
+			case TypeCode.String:
+				ilGenerator.Emit(OpCodes.Ldstr, (string)argument);
+				return true;
+			}
+			return false;
+		}
+
+		static void EmitLdcI4(this ILGenerator ilGenerator, int value)
+		{
+			switch (value)
+			{
+			case -1:
+				ilGenerator.Emit(OpCodes.Ldc_I4_M1);
+				break;
+			case 0:
+				ilGenerator.Emit(OpCodes.Ldc_I4_0);
+				break;
+			case 1:
+				ilGenerator.Emit(OpCodes.Ldc_I4_1);
+				break;
+			case 2:
+				ilGenerator.Emit(OpCodes.Ldc_I4_2);
+				break;
+			case 3:
+				ilGenerator.Emit(OpCodes.Ldc_I4_3);
+				break;
+			case 4:
+				ilGenerator.Emit(OpCodes.Ldc_I4_4);
+				break;
+			case 5:
+				ilGenerator.Emit(OpCodes.Ldc_I4_5);
+				break;
+			case 6:
+				ilGenerator.Emit(OpCodes.Ldc_I4_6);
+				break;
+			case 7:
+				ilGenerator.Emit(OpCodes.Ldc_I4_7);
+				break;
+			case 8:
+				ilGenerator.Emit(OpCodes.Ldc_I4_8);
+				break;
+			default:
+				if (value >= -sbyte.MinValue && value <= sbyte.MaxValue)
+					ilGenerator.Emit(OpCodes.Ldc_I4_S, (sbyte)value);
+				else
+					ilGenerator.Emit(OpCodes.Ldc_I4, value);
+				break;
+			}
+		}
+
+		static void EmitLdloc(this ILGenerator ilGenerator, LocalBuilder localVar)
+		{
+			var localIndex = localVar.LocalIndex;
+			switch (localIndex)
+			{
+			case 0:
+				ilGenerator.Emit(OpCodes.Ldloc_0);
+				break;
+			case 1:
+				ilGenerator.Emit(OpCodes.Ldloc_1);
+				break;
+			case 2:
+				ilGenerator.Emit(OpCodes.Ldloc_2);
+				break;
+			case 3:
+				ilGenerator.Emit(OpCodes.Ldloc_3);
+				break;
+			default:
+				if (localIndex <= byte.MaxValue)
+					ilGenerator.Emit(OpCodes.Ldloc_S);
+				else
+					ilGenerator.Emit(OpCodes.Ldloc);
+				break;
+			}
+		}
+
+		static void EmitLdloca(this ILGenerator ilGenerator, LocalBuilder localVar)
+		{
+			if (localVar.LocalIndex <= byte.MaxValue)
+				ilGenerator.Emit(OpCodes.Ldloca_S);
+			else
+				ilGenerator.Emit(OpCodes.Ldloca);
+		}
+
+		static void EmitStloc(this ILGenerator ilGenerator, LocalBuilder localVar)
+		{
+			var localIndex = localVar.LocalIndex;
+			switch (localIndex)
+			{
+			case 0:
+				ilGenerator.Emit(OpCodes.Stloc_0);
+				break;
+			case 1:
+				ilGenerator.Emit(OpCodes.Stloc_1);
+				break;
+			case 2:
+				ilGenerator.Emit(OpCodes.Stloc_2);
+				break;
+			case 3:
+				ilGenerator.Emit(OpCodes.Stloc_3);
+				break;
+			default:
+				if (localIndex <= byte.MaxValue)
+					ilGenerator.Emit(OpCodes.Stloc_S);
+				else
+					ilGenerator.Emit(OpCodes.Stloc);
+				break;
+			}
+		}
+
+		static void EmitLdarg(this ILGenerator ilGenerator, short index)
+		{
+			switch (index)
+			{
+			case 0:
+				ilGenerator.Emit(OpCodes.Ldarg_0);
+				break;
+			case 1:
+				ilGenerator.Emit(OpCodes.Ldarg_1);
+				break;
+			case 2:
+				ilGenerator.Emit(OpCodes.Ldarg_1);
+				break;
+			case 3:
+				ilGenerator.Emit(OpCodes.Ldarg_1);
+				break;
+			default:
+				if (index <= byte.MaxValue)
+					ilGenerator.Emit(OpCodes.Ldarg_S, (byte)index);
+				else
+					ilGenerator.Emit(OpCodes.Ldarg, index);
+				break;
 			}
 		}
 	}

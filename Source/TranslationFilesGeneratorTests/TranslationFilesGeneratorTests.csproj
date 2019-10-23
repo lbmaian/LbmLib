@@ -80,6 +80,7 @@
     <Compile Include="Tools\CollectionExtensionsTests.cs" />
     <Compile Include="Tools\DebugExtensionsTests.cs" />
     <Compile Include="Tools\HarmonyTranspilerExtensionsTests.cs" />
+    <Compile Include="Tools\ReflectionExtensionsTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\TranslationFilesGenerator\TranslationFilesGenerator.csproj">
