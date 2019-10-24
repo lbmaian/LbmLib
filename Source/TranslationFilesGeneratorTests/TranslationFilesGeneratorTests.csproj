@@ -67,7 +67,8 @@
       <Private>False</Private>
     </Reference>
     <Reference Include="Theraot.Core, Version=3.0.4.0, Culture=neutral, PublicKeyToken=b1460dff8a28f7a7, processorArchitecture=MSIL">
-      <HintPath>..\packages\Theraot.Core.3.0.4\lib\net35\Theraot.Core.dll</HintPath>
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\..\Assemblies\Theraot.Core.dll</HintPath>
     </Reference>
     <Reference Include="UnityEngine">
       <HintPath>..\..\..\..\RimWorldWin64_Data\Managed\UnityEngine.dll</HintPath>
