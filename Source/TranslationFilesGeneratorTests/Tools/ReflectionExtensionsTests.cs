@@ -6,16 +6,16 @@ namespace TranslationFilesGenerator.Tools.Tests
 	[TestFixture]
 	public class ReflectionExtensionsTests
 	{
-		static void SampleStaticVoidMethod(ref int x, string s, TestStruct v, int y, TestClass c, TestClass @null, long l)
+		static void SampleStaticVoidMethod(string s, TestStruct v, int y, TestClass c, TestClass @null, long l, ref int x)
 		{
-			Logging.Log(x, "x");
 			Logging.Log(s, "s");
 			Logging.Log(v.X, "v.X");
 			Logging.Log(y, "y");
 			Logging.Log(c.X, "c.X");
 			Logging.Log(@null, "@null");
 			Logging.Log(l, "l");
-			x = x * x;
+			Logging.Log(x, "x");
+			x *= x;
 		}
 
 		struct TestStruct
@@ -42,7 +42,7 @@ namespace TranslationFilesGenerator.Tools.Tests
 		public void DynamicPartialApplyTest()
 		{
 			var x = 100;
-			SampleStaticVoidMethod(ref x, "mystring", new TestStruct(1), 2, new TestClass(3), null, 4L);
+			SampleStaticVoidMethod("mystring", new TestStruct(1), 2, new TestClass(3), null, 4L, ref x);
 			var method = GetType().GetMethod(nameof(SampleStaticVoidMethod), BindingFlags.Static | BindingFlags.NonPublic);
 			var partialAppliedMethod = method.DynamicPartialApply("hello world", new TestStruct(10), 20, new TestClass(30), null, 40L);
 			var nonFixedArguments = new object[] { 20 };

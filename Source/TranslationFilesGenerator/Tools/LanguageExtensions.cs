@@ -3,10 +3,11 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
 using System.Text;
+using Theraot.Collections.ThreadSafe;
 
 namespace TranslationFilesGenerator.Tools
 {
@@ -818,23 +819,85 @@ namespace TranslationFilesGenerator.Tools
 			}
 		}
 
+		sealed class MethodHandleEqualityComparer : IEqualityComparer<MethodBase>
+		{
+			// MS .NET Framework reference implementation has DynamicMethod.MethodHandle always throw an exception.
+			// Attempt workaround by calling internal DynamicMethod.GetMethodDescriptor method.
+			static readonly Func<MethodBase, RuntimeMethodHandle> GetMethodDescriptorFunc = InitializeGetMethodDescriptorFunc();
+
+			static Func<MethodBase, RuntimeMethodHandle> InitializeGetMethodDescriptorFunc()
+			{
+				var bindingFlags = BindingFlags.Instance | BindingFlags.NonPublic;
+				var getMethodDescriptorMethod = typeof(DynamicMethod).GetMethod("GetMethodDescriptor", bindingFlags);
+				if (getMethodDescriptorMethod is null)
+					return null;
+				var rtDynamicMethodType = typeof(DynamicMethod).GetNestedType("RTDynamicMethod", bindingFlags);
+				var rtDynamicMethodOwnerField = rtDynamicMethodType.GetField("m_owner", bindingFlags);
+				//return (Func<MethodBase, RuntimeMethodHandle>)Delegate.CreateDelegate(typeof(Func<MethodBase, RuntimeMethodHandle>), getMethodDescriptorMethod);
+				return method => {
+					Console.WriteLine(method.GetType().ToDebugString());
+					if (method.GetType() == rtDynamicMethodType)
+						method = (DynamicMethod)rtDynamicMethodOwnerField.GetValue(method);
+					RuntimeMethodHandle handle;
+					if (method is DynamicMethod)
+						handle = (RuntimeMethodHandle)getMethodDescriptorMethod.Invoke(method, new object[0]);
+					else
+						handle = method.MethodHandle;
+					Console.WriteLine(" => " + handle);
+					return handle;
+				};
+			}
+
+			public bool Equals(MethodBase x, MethodBase y)
+			{
+				if (x is null)
+					return y is null;
+				if (y is null)
+					return false;
+				if (GetMethodDescriptorFunc is null)
+					return x.MethodHandle == y.MethodHandle;
+				else
+					return GetMethodDescriptorFunc(x) == GetMethodDescriptorFunc(y);
+			}
+
+			public int GetHashCode(MethodBase obj)
+			{
+				return obj is null ? 0 : (GetMethodDescriptorFunc is null ? obj.MethodHandle : GetMethodDescriptorFunc(obj)).GetHashCode();
+			}
+		}
+
 		sealed class PartialApplyClosure
 		{
 			public readonly object[] FixedNonConstantArguments;
 
 			internal static readonly Dictionary<MethodBase, uint> CountByMethod = new Dictionary<MethodBase, uint>();
-			internal static readonly ConditionalWeakTable<MethodBase, PartialApplyClosure> Closures = new ConditionalWeakTable<MethodBase, PartialApplyClosure>();
+			internal static readonly WeakDictionary<MethodBase, PartialApplyClosure> Closures =
+				new WeakDictionary<MethodBase, PartialApplyClosure>(/*new MethodHandleEqualityComparer()*/) { AutoRemoveDeadItems = true };
+			//internal static readonly Dictionary<MethodBase, PartialApplyClosure> Closures = new Dictionary<MethodBase, PartialApplyClosure>();
+
+			internal static readonly FieldInfo ClosuresField = typeof(PartialApplyClosure).GetField(nameof(Closures), BindingFlags.Static | BindingFlags.NonPublic);
+			internal static readonly FieldInfo NonConstantArgumentsField = typeof(PartialApplyClosure).GetField(nameof(FixedNonConstantArguments));
 
 			internal static readonly MethodInfo GetCurrentMethodMethod = typeof(MethodBase).GetMethod(nameof(MethodBase.GetCurrentMethod));
-			internal static readonly MethodInfo ConditionalWeakTableTryGetValueMethod = typeof(ConditionalWeakTable<MethodBase, PartialApplyClosure>).GetMethod("TryGetValue");
-			internal static readonly FieldInfo ClosuresField = typeof(PartialApplyClosure).GetField(nameof(Closures));
-			internal static readonly FieldInfo NonConstantArgumentsField = typeof(PartialApplyClosure).GetField(nameof(FixedNonConstantArguments));
+			internal static readonly MethodInfo WeakDictionaryTryGetValueMethod = typeof(WeakDictionary<MethodBase, PartialApplyClosure>).GetMethod(
+				nameof(WeakDictionary<MethodBase, PartialApplyClosure>.TryGetValue), new[] { typeof(MethodBase), typeof(PartialApplyClosure).MakeByRefType() });
+			//internal static readonly MethodInfo ConditionalWeakTableTryGetValueMethod = typeof(Dictionary<MethodBase, PartialApplyClosure>).GetMethod("TryGetValue");
+			internal static readonly ConstructorInfo InvalidOperationExceptionConstructor = typeof(InvalidOperationException).GetConstructor(new[] { typeof(string) });
+			internal static readonly MethodInfo ToDebugStringMethod = typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(MethodBase) });
+			internal static readonly MethodInfo StringConcatMethod = typeof(string).GetMethod(nameof(string.Concat), new[] { typeof(string), typeof(string) });
 
 			internal PartialApplyClosure(object[] fixedNonConstantArguments)
 			{
 				FixedNonConstantArguments = fixedNonConstantArguments;
 			}
+
+			public override string ToString()
+			{
+				return "PartialApplyClosure[" + FixedNonConstantArguments.Join() + "]";
+			}
 		}
+
+		static readonly bool DynamicPartialApplyGenerateDebugDll = false;
 
 		public static MethodInfo DynamicPartialApply(this MethodInfo method, params object[] fixedArguments)
 		{
@@ -847,71 +910,119 @@ namespace TranslationFilesGenerator.Tools
 			var parameters = method.GetParameters();
 			var totalArgumentCount = parameters.Length;
 			var fixedArgumentCount = fixedArguments.Length;
+			var isStatic = method.IsStatic;
+			var declaringType = method.DeclaringType;
+			var returnType = method.ReturnType;
+
+			// Since DynamicMethod can only be created as a static method, if instance method, prepend an additional non-fixed argument.
+			var prefixArgumentCount = isStatic ? 0 : 1;
+			totalArgumentCount += prefixArgumentCount;
 			var nonFixedArgumentCount = totalArgumentCount - fixedArgumentCount;
 			var nonFixedParameterTypes = new Type[nonFixedArgumentCount];
-			var returnType = method.ReturnType;
-			var isStatic = method.IsStatic;
 
-			var index = (short)0;
-			while (index < fixedArgumentCount)
+			for (var index = 0; index < fixedArgumentCount; index++)
 			{
 				var parameterType = parameters[index].ParameterType;
 				if (parameterType.IsByRef)
 					throw new ArgumentException("Cannot partial apply with a fixed argument passed by reference (including in and out arguments): " + parameters[index]);
-				index++;
 			}
-			while (index < totalArgumentCount)
-			{
-				nonFixedParameterTypes[index - fixedArgumentCount] = parameters[index].ParameterType;
-				index++;
-			}
+			// See above - need to prepend an additional non-fixed argument for instance methods.
+			if (!isStatic)
+				nonFixedParameterTypes[0] = declaringType;
+			for (var index = prefixArgumentCount; index < nonFixedArgumentCount; index++)
+				nonFixedParameterTypes[index] = parameters[fixedArgumentCount + index].ParameterType;
 
-			var dynamicMethod = new DynamicMethod(
-				method.Name + "_PartialApply_" + partialApplyCount,
-				method.Attributes,
-				method.CallingConvention,
-				returnType,
-				nonFixedParameterTypes,
-				method.DeclaringType,
-				skipVisibility: true);
-			for (index = 0; index < nonFixedArgumentCount; index++)
+			// Annoyingly, although both DynamicMethod and MethodBuilder implement MethodInfo and have both GetILGenerator and DefineParameter methods,
+			// there isn't an interface for those methods!
+			MethodInfo newMethod;
+			ILGenerator ilGenerator;
+			AssemblyBuilder assemblyBuilder = null;
+			TypeBuilder typeBuilder = null;
+			if (DynamicPartialApplyGenerateDebugDll)
 			{
-				var parameter = parameters[index];
-				dynamicMethod.DefineParameter(index, parameter.Attributes, parameter.Name);
-				// XXX: Do any custom attributes like ParamArrayAttribute need to be copied too?
-				// There's no good generic way to copy attributes as far as I can tell, since CustomAttributeBuilder is very cumbersome to use.
+				// This is based off Harmony.DynamicTools.CreateSaveableMethod.
+				var assemblyName = new AssemblyName("DebugAssembly");
+				var path = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+				assemblyBuilder = AppDomain.CurrentDomain.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave, path);
+				var moduleBuilder = assemblyBuilder.DefineDynamicModule(assemblyName.Name, assemblyName.Name + ".dll");
+				typeBuilder = moduleBuilder.DefineType("Debug" + declaringType.Name, TypeAttributes.Public);
+				var methodBuilder = typeBuilder.DefineMethod(
+					method.Name + "_PartialApply_" + partialApplyCount,
+					MethodAttributes.Public | MethodAttributes.Static,
+					CallingConventions.Standard,
+					returnType,
+					nonFixedParameterTypes);
+				if (!isStatic)
+					methodBuilder.DefineParameter(0, ParameterAttributes.None, "instance");
+				for (int index = prefixArgumentCount; index < nonFixedArgumentCount; index++)
+				{
+					var parameter = parameters[fixedArgumentCount + index];
+					// DefineParameter(0,...) refers to the return value, so for actual parameters, it's practically 1-based rather than 0-based.
+					methodBuilder.DefineParameter(index + 1, parameter.Attributes, parameter.Name);
+				}
+				newMethod = methodBuilder;
+				ilGenerator = methodBuilder.GetILGenerator();
 			}
-			var ilGenerator = dynamicMethod.GetILGenerator();
+			else
+			{
+				var dynamicMethod = new DynamicMethod(
+					method.Name + "_PartialApply_" + partialApplyCount,
+					// At least for legacy Unity, only the following MethodAttributes/CallingConventions are supported for DynamicMethod.
+					MethodAttributes.Public | MethodAttributes.Static,
+					CallingConventions.Standard,
+					returnType,
+					nonFixedParameterTypes,
+					declaringType,
+					skipVisibility: true);
+				if (!isStatic)
+					dynamicMethod.DefineParameter(0, ParameterAttributes.None, "instance");
+				for (int index = prefixArgumentCount; index < nonFixedArgumentCount; index++)
+				{
+					var parameter = parameters[fixedArgumentCount + index];
+					// DefineParameter(0,...) refers to the return value, so for actual parameters, it's practically 1-based rather than 0-based.
+					dynamicMethod.DefineParameter(index + 1, parameter.Attributes, parameter.Name);
+					// XXX: Do any custom attributes like ParamArrayAttribute need to be copied too?
+					// There's no good generic way to copy attributes as far as I can tell, since CustomAttributeBuilder is very cumbersome to use.
+				}
+				newMethod = dynamicMethod;
+				ilGenerator = dynamicMethod.GetILGenerator();
+			}
 
 			var closure = default(PartialApplyClosure);
 			var fixedNonConstantArgumentsVar = default(LocalBuilder);
-			var fixedNonConstantArgumentCount = fixedArguments.Count(CanEmitConstant);
-			if (fixedNonConstantArgumentCount > 0)
+			var fixedNonConstantArguments = fixedArguments.Where(CanEmitConstant);
+			if (fixedNonConstantArguments.Any())
 			{
 				// Create the closure (will be registered with PartialApplyClosure.Closures with dynamicMethod at the very end,
 				// since it's possible that an exception could be thrown throughout this PartialApply method).
-				closure = new PartialApplyClosure(new object[fixedNonConstantArgumentCount]);
+				closure = new PartialApplyClosure(fixedNonConstantArguments.ToArray());
 
 				// Emit the code that loads the closure from PartialApplyClosure.ClosuresField, and then its FixedNonConstantArguments into a local variable.
 				var closureVar = ilGenerator.DeclareLocal(typeof(PartialApplyClosure));
 				fixedNonConstantArgumentsVar = ilGenerator.DeclareLocal(typeof(object[]));
-				ilGenerator.Emit(OpCodes.Ldfld, PartialApplyClosure.ClosuresField);
+				ilGenerator.Emit(OpCodes.Ldsfld, PartialApplyClosure.ClosuresField);
 				ilGenerator.Emit(OpCodes.Call, PartialApplyClosure.GetCurrentMethodMethod);
 				ilGenerator.EmitLdloca(closureVar);
-				ilGenerator.Emit(OpCodes.Call, PartialApplyClosure.ConditionalWeakTableTryGetValueMethod);
-				ilGenerator.Emit(OpCodes.Pop); // throw away returned bool
+				ilGenerator.Emit(OpCodes.Call, PartialApplyClosure.WeakDictionaryTryGetValueMethod);
+				var foundClosureLabel = ilGenerator.DefineLabel();
+				ilGenerator.Emit(OpCodes.Brtrue_S, foundClosureLabel); // throw away returned bool
+				ilGenerator.Emit(OpCodes.Ldstr, "Unexpectedly did not find closure object for ");
+				ilGenerator.Emit(OpCodes.Call, PartialApplyClosure.GetCurrentMethodMethod);
+				ilGenerator.Emit(OpCodes.Call, PartialApplyClosure.ToDebugStringMethod);
+				ilGenerator.Emit(OpCodes.Call, PartialApplyClosure.StringConcatMethod);
+				ilGenerator.Emit(OpCodes.Newobj, PartialApplyClosure.InvalidOperationExceptionConstructor);
+				ilGenerator.Emit(OpCodes.Throw);
+				ilGenerator.MarkLabel(foundClosureLabel);
 				ilGenerator.EmitLdloc(closureVar);
 				ilGenerator.Emit(OpCodes.Ldfld, PartialApplyClosure.NonConstantArgumentsField);
 				ilGenerator.EmitStloc(fixedNonConstantArgumentsVar);
 			}
 
-			if (isStatic)
-			{
+			if (!isStatic)
 				ilGenerator.Emit(OpCodes.Ldarg_0);
-			}
 
 			var fixedNonConstantArgumentIndex = 0;
-			for (index = 0; index < fixedArgumentCount; index++)
+			for (var index = 0;  index < fixedArgumentCount; index++)
 			{
 				var fixedArgument = fixedArguments[index];
 				if (!ilGenerator.TryEmitConstant(fixedArgument))
@@ -929,13 +1040,9 @@ namespace TranslationFilesGenerator.Tools
 				}
 			}
 
-			var prefixArgumentCount = (short)((isStatic ? 1 : 0) + (fixedNonConstantArgumentCount > 0 ? 1 : 0));
-			index = prefixArgumentCount;
-			nonFixedArgumentCount += prefixArgumentCount;
-			while (index < nonFixedArgumentCount)
+			for (var index = (short)0; index < nonFixedArgumentCount; index++)
 			{
 				ilGenerator.EmitLdarg(index);
-				index++;
 			}
 
 			if (isStatic || method.IsFinal)
@@ -955,12 +1062,33 @@ namespace TranslationFilesGenerator.Tools
 			}
 			ilGenerator.Emit(OpCodes.Ret);
 
-			Harmony.DynamicTools.PrepareDynamicMethod(dynamicMethod);
+			if (DynamicPartialApplyGenerateDebugDll)
+			{
+				typeBuilder.CreateType();
+				assemblyBuilder.Save("DebugAssembly.dll");
+				// MethodBuilder doesn't have a RuntimeMethodHandle, so get the built method from typeBuilder.
+				method = typeBuilder.GetMethod(method.Name, nonFixedParameterTypes);
+			}
+			else
+			{
+				// TODO: Should this dependency on Harmony here be removed?
+				// Doesn't matter as long as both this file and Harmony-related files remain in the same project/library.
+				//Harmony.DynamicTools.PrepareDynamicMethod(newMethod as DynamicMethod);
+			}
+
+			var nonFixedParameterAndReturnTypes = new Type[nonFixedArgumentCount + 1];
+			Array.Copy(nonFixedParameterTypes, nonFixedParameterAndReturnTypes, nonFixedArgumentCount);
+			nonFixedParameterAndReturnTypes[nonFixedArgumentCount] = returnType;
+			var delegateType = ExpressionEx.GetDelegateType(nonFixedParameterAndReturnTypes);
+			newMethod = newMethod.CreateDelegate(delegateType).Method;
 
 			PartialApplyClosure.CountByMethod.Add(method, partialApplyCount + 1);
 			if (!(closure is null))
-				PartialApplyClosure.Closures.Add(dynamicMethod, closure);
-			return dynamicMethod;
+			{
+				PartialApplyClosure.Closures.AddNew(newMethod, closure);
+				Console.WriteLine($"Added closure for {newMethod.ToDebugString()}: {PartialApplyClosure.Closures.TryGetValue(newMethod, out var checkClosure)} => {checkClosure}");
+			}
+			return newMethod;
 		}
 
 		// TODO: Following should be public extension methods somewhere?
@@ -1100,9 +1228,9 @@ namespace TranslationFilesGenerator.Tools
 				break;
 			default:
 				if (localIndex <= byte.MaxValue)
-					ilGenerator.Emit(OpCodes.Ldloc_S);
+					ilGenerator.Emit(OpCodes.Ldloc_S, localVar);
 				else
-					ilGenerator.Emit(OpCodes.Ldloc);
+					ilGenerator.Emit(OpCodes.Ldloc, localVar);
 				break;
 			}
 		}
@@ -1110,9 +1238,9 @@ namespace TranslationFilesGenerator.Tools
 		static void EmitLdloca(this ILGenerator ilGenerator, LocalBuilder localVar)
 		{
 			if (localVar.LocalIndex <= byte.MaxValue)
-				ilGenerator.Emit(OpCodes.Ldloca_S);
+				ilGenerator.Emit(OpCodes.Ldloca_S, localVar);
 			else
-				ilGenerator.Emit(OpCodes.Ldloca);
+				ilGenerator.Emit(OpCodes.Ldloca, localVar);
 		}
 
 		static void EmitStloc(this ILGenerator ilGenerator, LocalBuilder localVar)
@@ -1134,9 +1262,9 @@ namespace TranslationFilesGenerator.Tools
 				break;
 			default:
 				if (localIndex <= byte.MaxValue)
-					ilGenerator.Emit(OpCodes.Stloc_S);
+					ilGenerator.Emit(OpCodes.Stloc_S, localVar);
 				else
-					ilGenerator.Emit(OpCodes.Stloc);
+					ilGenerator.Emit(OpCodes.Stloc, localVar);
 				break;
 			}
 		}

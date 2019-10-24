@@ -383,6 +383,7 @@ namespace TranslationFilesGenerator.Tools
 							"<" + type.GetGenericArguments().Select(genericTypeArg => genericTypeArg.ToDebugString()).Join() + ">";
 					}
 				}
+				// TODO: Somehow support delegate types better?
 				else
 				{
 					str = ToDebugStringTypeInternal(type, includeNamespace, includeDeclaringType);
@@ -409,8 +410,8 @@ namespace TranslationFilesGenerator.Tools
 			return method is null ? "null" :
 				(method.IsStatic ? "" : "instance ") +
 				(method is MethodInfo methodInfo ? methodInfo.ReturnType.ToDebugString() : "void") + " " +
-				method.DeclaringType.ToDebugString() + "::" + method.Name +
-				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString()).Join() + ")";
+				(method.DeclaringType is null ? "" : method.DeclaringType.ToDebugString() + "::") + method.Name +
+				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString()).Join() + ")" + " @ " + method.GetHashCode();
 		}
 
 		public static string ToDebugString(this ParameterInfo parameter)
