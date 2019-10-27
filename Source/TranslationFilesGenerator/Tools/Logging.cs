@@ -78,5 +78,10 @@ namespace TranslationFilesGenerator.Tools
 			Log(obj, label, labelDelimiter, logger, toStringer);
 			return obj;
 		}
+
+		public static void StringLog(this string str)
+		{
+			DefaultLogger(str ?? "null");
+		}
 	}
 }

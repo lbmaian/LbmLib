@@ -248,12 +248,8 @@ namespace TranslationFilesGenerator.Tools
 		{
 			return new[]
 			{
-				string.IsNullOrEmpty(str) ? new CodeInstruction(OpCodes.Ldnull) : new CodeInstruction(OpCodes.Ldstr, str),
-				new CodeInstruction(OpCodes.Ldnull), // label
-				new CodeInstruction(OpCodes.Ldnull), // labelDelimiter
-				new CodeInstruction(OpCodes.Ldnull), // logger
-				new CodeInstruction(OpCodes.Ldnull), // toStringer
-				new CodeInstruction(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.Log)).MakeGenericMethod(typeof(string))),
+				new CodeInstruction(OpCodes.Ldstr, str),
+				new CodeInstruction(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog))),
 			};
 		}
 

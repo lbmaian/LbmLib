@@ -15,6 +15,7 @@ namespace TranslationFilesGenerator.Tools
 
 	public static class DebugExtensions
 	{
+		// TODO: See if the following custom function overload resolution logic could all be simplfied by using Type.DefaultBinder.
 		// The following is all a workaround for C# extension methods not supporting late binding for function overload resolution:
 		// Specifically, use a custom dynamic dispatch algorithm in static string ToDebugString(this object obj).
 		// This is not a full-featured single parameter function overload resolution algorithm but it suffices for most uses cases.
@@ -411,7 +412,7 @@ namespace TranslationFilesGenerator.Tools
 				(method.IsStatic ? "" : "instance ") +
 				(method is MethodInfo methodInfo ? methodInfo.ReturnType.ToDebugString() : "void") + " " +
 				(method.DeclaringType is null ? "" : method.DeclaringType.ToDebugString() + "::") + method.Name +
-				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString()).Join() + ")" + " @ " + method.GetHashCode();
+				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString()).Join() + ")";
 		}
 
 		public static string ToDebugString(this ParameterInfo parameter)
