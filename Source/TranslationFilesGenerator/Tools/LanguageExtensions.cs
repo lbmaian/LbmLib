@@ -321,7 +321,7 @@ namespace TranslationFilesGenerator.Tools
 				actualList.Reverse(index, count);
 				return;
 			}
-			// TODO: This could be made more efficient by implementing algorithm in Array.Reverse(array, index, count),
+			// XXX: This could be made more efficient by implementing algorithm in Array.Reverse(array, index, count),
 			// although it's probably not worth the effort.
 			var listCount = list.Count;
 			var array = new T[listCount];
@@ -344,7 +344,7 @@ namespace TranslationFilesGenerator.Tools
 				actualList.Sort();
 				return;
 			}
-			// TODO: This could be made more efficient by implementing algorithm in Array.Sort(array),
+			// XXX: This could be made more efficient by implementing algorithm in Array.Sort(array),
 			// although it's probably not worth the effort.
 			var listCount = list.Count;
 			var array = new T[listCount];
@@ -360,7 +360,7 @@ namespace TranslationFilesGenerator.Tools
 				actualList.Sort(comparer);
 				return;
 			}
-			// TODO: This could be made more efficient by implementing algorithm in Array.Sort(array),
+			// XXX: This could be made more efficient by implementing algorithm in Array.Sort(array),
 			// although it's probably not worth the effort.
 			var listCount = list.Count;
 			var array = new T[listCount];
@@ -376,7 +376,7 @@ namespace TranslationFilesGenerator.Tools
 				actualList.Sort(index, count, comparer);
 				return;
 			}
-			// TODO: This could be made more efficient by implementing algorithm in Array.Sort(array, index, count, comparer),
+			// XXX: This could be made more efficient by implementing algorithm in Array.Sort(array, index, count, comparer),
 			// although it's probably not worth the effort.
 			var listCount = list.Count;
 			var array = new T[listCount];
@@ -392,7 +392,7 @@ namespace TranslationFilesGenerator.Tools
 				actualList.Sort(new Comparison<T>(comparison));
 				return;
 			}
-			// TODO: This could be made more efficient by implementing algorithm in Array.Sort(array, comparison),
+			// XXX: This could be made more efficient by implementing algorithm in Array.Sort(array, comparison),
 			// although it's probably not worth the effort.
 			var listCount = list.Count;
 			var array = new T[listCount];
@@ -478,7 +478,7 @@ namespace TranslationFilesGenerator.Tools
 		{
 			if (list is List<T> actualList)
 				return actualList.BinarySearch(index, count, item, comparer);
-			// TODO: This could be made more efficient by implementing algorithm in Array.BinarySearch(array, index, count, item, comparer),
+			// XXX: This could be made more efficient by implementing algorithm in Array.BinarySearch(array, index, count, item, comparer),
 			// although it's probably not worth the effort.
 			var listCount = list.Count;
 			var array = new T[listCount];
@@ -819,19 +819,56 @@ namespace TranslationFilesGenerator.Tools
 			}
 		}
 
-		// Note: Only public so that a method created via DebugDynamicMethodBuilder (which creates a separate assembly) has access to PartialApplyClosure.
-		public sealed class PartialApplyClosure
+		const bool ClosureMethodGenerateDebugDll = false;
+
+		sealed class ClosureMethod : MethodInfo
 		{
-			public readonly object FixedThisObject;
-			public readonly object[] FixedNonConstantArguments;
+			readonly MethodInfo method;
+			readonly RuntimeMethodHandle methodHandle;
+			readonly MethodAttributes methodAttributes;
+			readonly ParameterInfo[] nonFixedParameterInfos;
+			readonly object fixedThisObject;
 
-			static int minimumFreeClosureKey = 0;
-			public static readonly List<PartialApplyClosure> Closures = new List<PartialApplyClosure>();
+			// Closures is the actual registry of fixedNonConstantArguments arrays, with closureKey being an index into it.
+			// It's an object[] rather than a custom struct so that other assemblies can more easily access it, as is required with DebugDynamicMethodBuilder,
+			// since other assemblies can only access public structures, fields, etc. (or else would require expensive reflection within the dynamically-generated method).
+			// DebugDynamicMethodBuilder's build type will have its own field that stores a reference to this closures.
+			readonly int closureKey;
+			internal static readonly List<object[]> Closures = new List<object[]>();
+			static int MinimumFreeClosureKey = 0;
 
-			internal PartialApplyClosure(object fixedThisObject, object[] fixedNonConstantArguments)
+			internal ClosureMethod(int closureKey, MethodInfo method, RuntimeMethodHandle methodHandle,
+				MethodAttributes methodAttributes, ParameterInfo[] nonFixedParameterInfos, object fixedThisObject, object[] fixedNonConstantArguments)
 			{
-				FixedThisObject = fixedThisObject;
-				FixedNonConstantArguments = fixedNonConstantArguments;
+				this.closureKey = closureKey;
+				this.method = method;
+				this.methodHandle = methodHandle;
+				this.methodAttributes = methodAttributes;
+				this.nonFixedParameterInfos = nonFixedParameterInfos;
+				// Assertion: if fixedThisObject is non-null, methodAttributes must include MethodAttributes.Static.
+				this.fixedThisObject = fixedThisObject;
+
+				// Even if fixedNonConstantArguments is empty and thus technically isn't even accessed within the dynamic method, register it,
+				// since we also store the this object (in DynamicBind) there, and we've already reserved the closure key for it anyway.
+				Closures[closureKey] = fixedNonConstantArguments;
+			}
+
+			internal ClosureMethod Bind(int closureKey, object fixedThisObject)
+			{
+				return new ClosureMethod(closureKey, method, methodHandle, methodAttributes, nonFixedParameterInfos, fixedThisObject, Closures[closureKey]);
+			}
+
+			~ClosureMethod()
+			{
+				lock (Closures)
+				{
+					Closures[closureKey] = null;
+					if (closureKey < MinimumFreeClosureKey)
+					{
+						MinimumFreeClosureKey = closureKey;
+					}
+				}
+				Logging.Log($"DEBUG FreeClosureKey: closureKey={closureKey}, minimumFreeClosureKey={MinimumFreeClosureKey}");
 			}
 
 			internal static int ReserveNextFreeClosureKey()
@@ -840,76 +877,23 @@ namespace TranslationFilesGenerator.Tools
 				lock (Closures)
 				{
 					var closuresCount = Closures.Count;
-					for (var closureKey = minimumFreeClosureKey; closureKey < closuresCount; closureKey++)
+					for (var closureKey = MinimumFreeClosureKey; closureKey < closuresCount; closureKey++)
 					{
 						if (Closures[closureKey] is null)
 						{
-							minimumFreeClosureKey = closureKey + 1;
+							MinimumFreeClosureKey = closureKey + 1;
 							return closureKey;
 						}
 					}
-					minimumFreeClosureKey = closuresCount + 1;
+					MinimumFreeClosureKey = closuresCount + 1;
 					Closures.Add(null);
 					return closuresCount;
 				}
 			}
 
-			internal static void FreeClosureKey(int closureKey)
-			{
-				lock (Closures)
-				{
-					Closures[closureKey] = null;
-					if (closureKey < minimumFreeClosureKey)
-					{
-						minimumFreeClosureKey = closureKey;
-					}
-				}
-				Logging.Log($"DEBUG FreeClosureKey: closureKey={closureKey}, minimumFreeClosureKey={minimumFreeClosureKey}");
-			}
-
 			public override string ToString() =>
-				$"PartialApplyClosure{{FixedThisObject={FixedThisObject.ToDebugString()}, FixedNonConstantArguments={FixedNonConstantArguments.ToDebugString()}}}";
-		}
-
-		sealed class PartialApplyMethod : MethodInfo
-		{
-			readonly MethodInfo method;
-			readonly RuntimeMethodHandle methodHandle;
-			readonly MethodAttributes methodAttributes;
-			readonly ParameterInfo[] nonFixedParameterInfos;
-
-			readonly int closureKey;
-			readonly PartialApplyClosure Closure;
-
-			internal PartialApplyMethod(int closureKey, MethodInfo method, RuntimeMethodHandle methodHandle,
-				MethodAttributes methodAttributes, ParameterInfo[] nonFixedParameterInfos, object fixedThisObject, object[] fixedNonConstantArguments)
-			{
-				this.method = method;
-				this.methodHandle = methodHandle;
-				this.methodAttributes = methodAttributes;
-				this.nonFixedParameterInfos = nonFixedParameterInfos;
-
-				// Assertion: if fixedThisObject is non-null, methodAttributes must include MethodAttributes.Static.
-				this.closureKey = closureKey;
-				Closure = new PartialApplyClosure(fixedThisObject, fixedNonConstantArguments);
-
-				// Even if fixedNonConstantArguments is empty and thus the closure technically isn't even accessed within the dynamic method, register the closure,
-				// since we also store the this object (in DynamicBind) there, and we've already reserved the closure key for it anyway.
-				PartialApplyClosure.Closures[closureKey] = Closure;
-			}
-
-			internal PartialApplyMethod Bind(int closureKey, object fixedThisObject)
-			{
-				return new PartialApplyMethod(closureKey, method, methodHandle, methodAttributes, nonFixedParameterInfos, fixedThisObject, Closure.FixedNonConstantArguments);
-			}
-
-			~PartialApplyMethod()
-			{
-				PartialApplyClosure.FreeClosureKey(closureKey);
-			}
-
-			public override string ToString() =>
-				$"PartialApplyMethod{{closureKey={closureKey}, method={method.ToDebugString()}, methodHandle={methodHandle}, attributes={methodAttributes}, closure={Closure}}}";
+				$"ClosureMethod{{closureKey={closureKey}, method={method.ToDebugString()}, methodHandle={methodHandle}, attributes={methodAttributes}, " +
+				$"fixedThisObject={fixedThisObject.ToDebugString()}, fixedNonConstantArguments={Closures[closureKey].ToDebugString()}}}";
 
 			public string ToDebugString() => ToString();
 
@@ -919,13 +903,13 @@ namespace TranslationFilesGenerator.Tools
 				{
 					// Assertion: obj is null (static method requires null obj, and constructors aren't supported here yet).
 					var actualParameters = parameters;
-					if (!(Closure.FixedThisObject is null))
+					if (!(fixedThisObject is null))
 					{
 						// To support DynamicBind, we replace the first argument with FixedThisObject,
 						// but in a new array to avoid mutating an input.
 						var parameterCount = parameters.Length;
 						actualParameters = new object[parameterCount];
-						actualParameters[0] = Closure.FixedThisObject;
+						actualParameters[0] = fixedThisObject;
 						Array.Copy(parameters, 1, actualParameters, 1, parameterCount - 1);
 					}
 					return method.Invoke(null, invokeAttr, binder, actualParameters, culture);
@@ -966,8 +950,6 @@ namespace TranslationFilesGenerator.Tools
 			public override bool IsDefined(Type attributeType, bool inherit) => method.IsDefined(attributeType, inherit);
 		}
 
-		static readonly bool DynamicPartialApplyGenerateDebugDll = false;
-
 		// TODO: CreateDelegate extension methods that would be needed pre .NET 4.5?
 
 		public static MethodInfo DynamicBind(this MethodInfo method, object target)
@@ -976,25 +958,23 @@ namespace TranslationFilesGenerator.Tools
 				throw new ArgumentNullException(nameof(target));
 			if (method.IsStatic)
 				throw new ArgumentException("Cannot call DynamicBind on a static method");
-			if (method is PartialApplyMethod partialApplyMethod)
-				return partialApplyMethod.Bind(PartialApplyClosure.ReserveNextFreeClosureKey(), target);
-			return DynamicBindOrPartialApply(method, target, new object[0]);
+			if (method is ClosureMethod closureMethod)
+				return closureMethod.Bind(ClosureMethod.ReserveNextFreeClosureKey(), target);
+			return CreateClosureMethod(method, target, new object[0]);
 		}
 
-		static readonly FieldInfo ClosuresField = typeof(PartialApplyClosure).GetField(nameof(PartialApplyClosure.Closures));
-		static readonly FieldInfo NonConstantArgumentsField = typeof(PartialApplyClosure).GetField(nameof(PartialApplyClosure.FixedNonConstantArguments));
 		static readonly MethodInfo GetCurrentMethodMethod = typeof(MethodBase).GetMethod(nameof(MethodBase.GetCurrentMethod));
-		static readonly MethodInfo ListItemGetMethod = typeof(List<PartialApplyMethod>).GetProperty("Item").GetGetMethod();
+		static readonly MethodInfo ListItemGetMethod = typeof(List<object[]>).GetProperty("Item").GetGetMethod();
 		static readonly ConstructorInfo InvalidOperationExceptionConstructor = typeof(InvalidOperationException).GetConstructor(new[] { typeof(string) });
 		static readonly MethodInfo MethodBaseToDebugStringMethod = typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(MethodBase) });
 		static readonly MethodInfo StringFormat2Method = typeof(string).GetMethod(nameof(string.Format), new[] { typeof(string), typeof(object), typeof(object) });
 
 		public static MethodInfo DynamicPartialApply(this MethodInfo method, params object[] fixedArguments)
 		{
-			return DynamicBindOrPartialApply(method, null, fixedArguments);
+			return CreateClosureMethod(method, null, fixedArguments);
 		}
 
-		static MethodInfo DynamicBindOrPartialApply(MethodInfo method, object fixedThisObject, object[] fixedArguments)
+		static MethodInfo CreateClosureMethod(MethodInfo method, object fixedThisObject, object[] fixedArguments)
 		{
 			var parameters = method.GetParameters();
 			var totalArgumentCount = parameters.Length;
@@ -1004,7 +984,7 @@ namespace TranslationFilesGenerator.Tools
 			var returnType = method.ReturnType;
 
 			// Since DynamicMethod can only be created as a static method, if instance method, prepend an additional non-fixed argument.
-			// But don't do this for the ParameterInfo array that is passed to PartialApplyMethod at the end.
+			// But don't do this for the ParameterInfo array that is passed to ClosureMethod at the end.
 			var nonFixedParameterInfos = new ParameterInfo[totalArgumentCount - fixedArgumentCount];
 			var prefixArgumentCount = isStatic ? 0 : 1;
 			totalArgumentCount += prefixArgumentCount;
@@ -1027,11 +1007,11 @@ namespace TranslationFilesGenerator.Tools
 				nonFixedParameterTypes[index] = parameter.ParameterType;
 			}
 
-			var closureKey = PartialApplyClosure.ReserveNextFreeClosureKey();
-			var methodBuilder = (DynamicPartialApplyGenerateDebugDll ?
+			var closureKey = ClosureMethod.ReserveNextFreeClosureKey();
+			var methodBuilder = (ClosureMethodGenerateDebugDll ?
 				(IDynamicMethodBuilderFactory)new DebugDynamicMethodBuilder.Factory() : new DynamicMethodBuilder.Factory()).Create(
+				method.Name + "_Closure_" + closureKey,
 				// Some .NET implementations only accept the following MethodAttributes/CallingConventions for DynamicMethod.
-				method.Name + "_PartialApply_" + closureKey,
 				MethodAttributes.Public | MethodAttributes.Static,
 				CallingConventions.Standard,
 				declaringType,
@@ -1049,13 +1029,13 @@ namespace TranslationFilesGenerator.Tools
 			}
 			var ilGenerator = methodBuilder.GetILGenerator();
 
-			// Store fixed non-constant arguments for the PartialApplyClosure that's created at the end of this method,
-			// while emitting instructions to load said PartialApplyClosure and its fixed non-constant arguments.
+			// Store fixed non-constant arguments for the ClosureMethod that's created at the end of this method,
+			// while emitting instructions to fixed non-constant arguments from said ClosureMethod.
 			var fixedNonConstantArgumentsVar = default(LocalBuilder);
 			var fixedNonConstantArguments = fixedArguments.Where(CannotEmitConstant).ToArray();
 			if (fixedNonConstantArguments.Length > 0)
 			{
-				//ilGenerator.Emit(OpCodes.Ldstr, "DEBUG PartialApplyClosure: closureKey={0} inside method=\"{1}\"");
+				//ilGenerator.Emit(OpCodes.Ldstr, "DEBUG ClosureMethod: closureKey={0} inside method=\"{1}\"");
 				//ilGenerator.EmitLdcI4(closureKey);
 				//ilGenerator.Emit(OpCodes.Box, typeof(int));
 				//ilGenerator.Emit(OpCodes.Call, GetCurrentMethodMethod);
@@ -1063,16 +1043,13 @@ namespace TranslationFilesGenerator.Tools
 				//ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
 				//ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
 
-				// Emit the code that loads the closure from PartialApplyClosure.ClosuresField, and then its FixedNonConstantArguments into a local variable.
-				//var closureVar = ilGenerator.DeclareLocal(typeof(PartialApplyClosure));
+				// Emit the code that loads the closure from ClosureMethod.ClosuresField, and then its FixedNonConstantArguments into a local variable.
 				fixedNonConstantArgumentsVar = ilGenerator.DeclareLocal(typeof(object[]));
-				ilGenerator.Emit(OpCodes.Ldsfld, ClosuresField);
+				ilGenerator.Emit(OpCodes.Ldsfld, methodBuilder.GetClosuresField());
 				ilGenerator.EmitLdcI4(closureKey);
 				ilGenerator.Emit(OpCodes.Call, ListItemGetMethod);
 				ilGenerator.Emit(OpCodes.Dup);
-				//ilGenerator.EmitStloc(closureVar);
 				var foundClosureLabel = ilGenerator.DefineLabel();
-				//ilGenerator.EmitLdloc(closureVar);
 				ilGenerator.Emit(OpCodes.Brtrue_S, foundClosureLabel);
 				ilGenerator.Emit(OpCodes.Ldstr, "Unexpectedly did not find closure object for closureKey={0} inside method=\"{1}\"");
 				ilGenerator.EmitLdcI4(closureKey);
@@ -1083,11 +1060,9 @@ namespace TranslationFilesGenerator.Tools
 				ilGenerator.Emit(OpCodes.Newobj, InvalidOperationExceptionConstructor);
 				ilGenerator.Emit(OpCodes.Throw);
 				ilGenerator.MarkLabel(foundClosureLabel);
-				//ilGenerator.EmitLdloc(closureVar);
-				ilGenerator.Emit(OpCodes.Ldfld, NonConstantArgumentsField);
 				ilGenerator.EmitStloc(fixedNonConstantArgumentsVar);
 
-				//ilGenerator.Emit(OpCodes.Ldstr, "DEBUG PartialApplyClosure: closureKey={0} inside method: closure.FixedNonConstantArguments=\"{1}\"");
+				//ilGenerator.Emit(OpCodes.Ldstr, "DEBUG ClosureMethod: closureKey={0} inside method: closure=\"{1}\"");
 				//ilGenerator.EmitLdcI4(closureKey);
 				//ilGenerator.Emit(OpCodes.Box, typeof(int));
 				//ilGenerator.EmitLdloc(fixedNonConstantArgumentsVar);
@@ -1109,7 +1084,7 @@ namespace TranslationFilesGenerator.Tools
 					var fixedArgumentType = fixedArgument.GetType();
 					ilGenerator.EmitLdloc(fixedNonConstantArgumentsVar);
 					ilGenerator.EmitLdcI4(fixedNonConstantArgumentIndex);
-					// PartialApplyClosure.NonConstantArgumentsField is an array of objects, so each element of it needs to be accessed by reference,
+					// fixedNonConstantArguments is an array of objects, so each element of it needs to be accessed by reference,
 					// and if argument is supposed to be a value type, unbox it.
 					ilGenerator.Emit(OpCodes.Ldelem_Ref);
 					if (fixedArgumentType.IsValueType)
@@ -1140,10 +1115,10 @@ namespace TranslationFilesGenerator.Tools
 			}
 			ilGenerator.Emit(OpCodes.Ret);
 
-			var partialApplyMethod = methodBuilder.GetMethod();
-			Logging.Log($"DEBUG DynamicPartialApply: closureKey={closureKey} created method={partialApplyMethod.ToDebugString()}");
+			var closureMethod = methodBuilder.GetMethod();
+			Logging.Log($"DEBUG ClosureMethod: closureKey={closureKey} created closureMethod={closureMethod.ToDebugString()}");
 
-			return new PartialApplyMethod(closureKey, partialApplyMethod, methodBuilder.GetMethodHandle(partialApplyMethod), method.Attributes,
+			return new ClosureMethod(closureKey, closureMethod, methodBuilder.GetMethodHandle(closureMethod), method.Attributes,
 				nonFixedParameterInfos, fixedThisObject, fixedNonConstantArguments);
 		}
 
@@ -1162,6 +1137,8 @@ namespace TranslationFilesGenerator.Tools
 			MethodInfo GetMethod();
 
 			RuntimeMethodHandle GetMethodHandle(MethodInfo method);
+
+			FieldInfo GetClosuresField();
 		}
 
 		class DynamicMethodBuilder : IDynamicMethodBuilder
@@ -1194,13 +1171,7 @@ namespace TranslationFilesGenerator.Tools
 
 			public ILGenerator GetILGenerator() => dynamicMethod.GetILGenerator();
 
-			public MethodInfo GetMethod()
-			{
-				// TODO: Should this dependency on Harmony here be removed?
-				// Doesn't matter as long as both this file and Harmony-related files remain in the same project/library.
-				//Harmony.DynamicTools.PrepareDynamicMethod(newMethod as DynamicMethod);
-				return dynamicMethod;
-			}
+			public MethodInfo GetMethod() => dynamicMethod;
 
 			// For MS .NET implementations
 			static readonly MethodInfo GetMethodDescriptorMethod = typeof(DynamicMethod).GetMethod("GetMethodDescriptor", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1224,6 +1195,10 @@ namespace TranslationFilesGenerator.Tools
 				}
 				throw new NotSupportedException("Could not create RuntimeMethodHandle");
 			}
+
+			static readonly FieldInfo ClosuresField = typeof(ClosureMethod).GetField(nameof(ClosureMethod.Closures), BindingFlags.Static | BindingFlags.NonPublic);
+
+			public FieldInfo GetClosuresField() => ClosuresField;
 		}
 
 		// This is based off Harmony.DynamicTools.CreateSaveableMethod/SaveMethod.
@@ -1239,14 +1214,22 @@ namespace TranslationFilesGenerator.Tools
 					Directory.CreateDirectory(dirPath);
 					var assemblyBuilder = AppDomain.CurrentDomain.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.RunAndSave, dirPath);
 					var moduleBuilder = assemblyBuilder.DefineDynamicModule(name, name + ".dll");
-					var typeBuilder = moduleBuilder.DefineType("Debug" + declaringType.Name, TypeAttributes.Public);
+
+					var typeNamePrefix = string.IsNullOrEmpty(declaringType.Namespace) ? "Debug_" : declaringType.Namespace + ".Debug_";
+					var typeBuilder = moduleBuilder.DefineType(typeNamePrefix + declaringType.Name, TypeAttributes.Public);
 					var methodBuilder = typeBuilder.DefineMethod(
 						name,
 						methodAttributes,
 						callingConvention,
 						returnType,
 						parameterTypes);
-					return new DebugDynamicMethodBuilder(dirPath, parameterTypes, assemblyBuilder, typeBuilder, methodBuilder);
+
+					var closuresHolderTypeBuilder = moduleBuilder.DefineType(typeNamePrefix + "ClosuresHolder");
+					closuresHolderTypeBuilder.DefineField(nameof(ClosureMethod.Closures), typeof(List<object[]>), FieldAttributes.Static);
+					var closuresHolderType = closuresHolderTypeBuilder.CreateType();
+					closuresHolderType.GetField(nameof(ClosureMethod.Closures), BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, ClosureMethod.Closures);
+
+					return new DebugDynamicMethodBuilder(dirPath, parameterTypes, assemblyBuilder, typeBuilder, methodBuilder, closuresHolderType);
 				}
 			}
 
@@ -1255,14 +1238,17 @@ namespace TranslationFilesGenerator.Tools
 			readonly AssemblyBuilder assemblyBuilder;
 			readonly TypeBuilder typeBuilder;
 			readonly MethodBuilder methodBuilder;
+			readonly Type closuresHolderType;
 
-			DebugDynamicMethodBuilder(string dirPath, Type[] parameterTypes, AssemblyBuilder assemblyBuilder, TypeBuilder typeBuilder, MethodBuilder methodBuilder)
+			DebugDynamicMethodBuilder(string dirPath, Type[] parameterTypes, AssemblyBuilder assemblyBuilder, TypeBuilder typeBuilder, MethodBuilder methodBuilder,
+				Type closuresHolderType)
 			{
 				this.dirPath = dirPath;
 				this.parameterTypes = parameterTypes;
 				this.assemblyBuilder = assemblyBuilder;
 				this.typeBuilder = typeBuilder;
 				this.methodBuilder = methodBuilder;
+				this.closuresHolderType = closuresHolderType;
 			}
 
 			public ParameterBuilder DefineParameter(int position, ParameterAttributes attributes, string parameterName) =>
@@ -1281,6 +1267,8 @@ namespace TranslationFilesGenerator.Tools
 			}
 
 			public RuntimeMethodHandle GetMethodHandle(MethodInfo method) => method.MethodHandle;
+
+			public FieldInfo GetClosuresField() => closuresHolderType.GetField(nameof(ClosureMethod.Closures), BindingFlags.Static | BindingFlags.NonPublic);
 		}
 
 		// TODO: Following should be public extension methods somewhere?
