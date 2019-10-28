@@ -31,7 +31,7 @@ namespace LbmLib.Language.Tests
 			Assert.AreEqual("void", typeof(void).ToDebugString());
 			Assert.AreEqual("List<int> { 1, 2, 3, 4 }", new List<int>() { 1, 2, 3, 4 }.ToDebugString());
 			Assert.AreEqual("System.Collections.Generic.Dictionary<string, Func<int?[,,][], object>>", typeof(Dictionary<string, Func<int?[,,][], object>>).ToDebugString());
-			Assert.AreEqual("instance object LbmLib.Tests.DebugExtensionsTests::TestMethodSignature(int[,,][][,] a, in string b, " +
+			Assert.AreEqual("instance object LbmLib.Language.Tests.DebugExtensionsTests::TestMethodSignature(int[,,][][,] a, in string b, " +
 				"out System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<K, V>> c, ref double? d, " +
 				"params System.Collections.Generic.Dictionary<K, V>[] e)",
 				GetType().GetMethod(nameof(TestMethodSignature)).ToDebugString());

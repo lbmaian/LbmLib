@@ -8,11 +8,6 @@ using System.Runtime.CompilerServices;
 
 namespace LbmLib.Language
 {
-	public static class DebugLogging
-	{
-		public static readonly Func<object, string> ToDebugStringer = obj => obj.ToDebugString();
-	}
-
 	public static class DebugExtensions
 	{
 		// TODO: See if the following custom function overload resolution logic could all be simplfied by using Type.DefaultBinder.

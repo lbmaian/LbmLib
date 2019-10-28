@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 
-namespace LbmLib.Language.Tests
+namespace LbmLib.Language.Experimental.Tests
 {
 	[TestFixture]
-	public class ReflectionExtensionsTests
+	public class MethodClosureExtensionsTests
 	{
 		[OneTimeSetUp]
 		public static void SetUpOnce()
