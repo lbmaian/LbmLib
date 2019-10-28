@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 
@@ -7,6 +8,12 @@ namespace TranslationFilesGenerator.Tools.Tests
 	[TestFixture]
 	public class ReflectionExtensionsTests
 	{
+		[OneTimeSetUp]
+		public static void SetUpOnce()
+		{
+			Logging.DefaultLogger = Logging.ConsoleLogger;
+		}
+
 		// Note: Following test method and structure fixtures are public so that methods dynamically created via DebugDynamicMethodBuilder have access to them.
 
 		public struct TestStruct
@@ -75,26 +82,30 @@ namespace TranslationFilesGenerator.Tools.Tests
 		[Test]
 		public void DynamicPartialApplyTest_SampleStaticVoidMethod_MultipleTimes()
 		{
-			var x = 100;
-			SampleStaticVoidMethod("mystring", new TestStruct(1), 2, new TestClass(3), null, 4L, ref x);
-			var method = GetType().GetMethod(nameof(SampleStaticVoidMethod));
-			var partialAppliedMethod = default(MethodInfo);
-			for (var i = 0; i < 20; i++)
+			var list = new List<string>();
+			using (Logging.With(x => list.Add(x)))
 			{
-				if (i % 5 == 0)
+				var x = 100;
+				SampleStaticVoidMethod("mystring", new TestStruct(1), 2, new TestClass(3), null, 4L, ref x);
+				var method = GetType().GetMethod(nameof(SampleStaticVoidMethod));
+				var partialAppliedMethod = default(MethodInfo);
+				for (var i = 0; i < 20; i++)
 				{
-					GC.Collect();
-					GC.WaitForPendingFinalizers();
+					partialAppliedMethod = method.DynamicPartialApply("hello world", new TestStruct(10), 20, new TestClass(30), null, 40L);
+					if (i % 5 == 0)
+					{
+						GC.Collect();
+						GC.WaitForPendingFinalizers();
+					}
 				}
-				partialAppliedMethod = method.DynamicPartialApply("hello world", new TestStruct(10), 20, new TestClass(30), null, 40L);
+				var nonFixedArguments = new object[] { 20 };
+				partialAppliedMethod.Invoke(null, nonFixedArguments);
+				Assert.AreEqual(20 * 20, nonFixedArguments[0]);
+				partialAppliedMethod = null;
+				GC.Collect();
+				GC.WaitForPendingFinalizers();
 			}
-			var nonFixedArguments = new object[] { 20 };
-			partialAppliedMethod.Invoke(null, nonFixedArguments);
-			Assert.AreEqual(20 * 20, nonFixedArguments[0]);
-			partialAppliedMethod = null;
-			GC.Collect();
-			GC.WaitForPendingFinalizers();
-			//System.Threading.Thread.Sleep(2000);
+			Logging.Log(list.Join("\n"));
 		}
 
 		// TODO: Test DynamicPartialApply on method with return value.
