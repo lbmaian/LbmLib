@@ -1,2 +1,2 @@
 # Lbm Utilities Library
-Various C# utilities intended for use with [Harmony](https://github.com/pardeike/Harmony) and .NET Framework 3.5, specifically Unity's .NET 3.5 equivalent runtime (legacy Mono), although they also work with the latest .NET Framework version (4.8 as of now).
+Various C# utilities intended for use with [Harmony](https://github.com/pardeike/Harmony) and .NET Framework 3.5, specifically Unity's .NET 3.5 equivalent runtime (legacy Mono), although they should also work with all the .NET versions that Harmony is compatible with.
