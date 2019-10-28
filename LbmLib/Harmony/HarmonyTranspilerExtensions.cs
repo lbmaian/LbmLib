@@ -7,8 +7,9 @@ using System.Reflection.Emit;
 using System.Text;
 using Harmony;
 using Harmony.ILCopying;
+using LbmLib.Language;
 
-namespace LbmLib
+namespace LbmLib.Harmony
 {
 	[AttributeUsage(AttributeTargets.Class)]
 	public class HarmonyDebugAttribute : Attribute
@@ -92,7 +93,7 @@ namespace LbmLib
 			var toDebugStringMethod = typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(Type) });
 			foreach (var instruction in instructions)
 			{
-				if (instruction.opcode == OpCodes.Callvirt && instruction.operand == typeFullNameGetMethod)
+				if (instruction.opcode == OpCodes.Callvirt && (MethodInfo)instruction.operand == typeFullNameGetMethod)
 					instruction.SetTo(OpCodes.Call, toDebugStringMethod);
 				yield return instruction;
 			}

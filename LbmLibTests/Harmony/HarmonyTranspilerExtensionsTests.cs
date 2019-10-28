@@ -4,9 +4,10 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using Harmony;
+using LbmLib.Language;
 using NUnit.Framework;
 
-namespace LbmLib.Tests
+namespace LbmLib.Harmony.Tests
 {
 	[TestFixture]
 	public class HarmonyTranspilerExtensionsTests

@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
 using NUnit.Framework;
 
-namespace LbmLib.Tests
+namespace LbmLib.Language.Tests
 {
 	[TestFixture]
 	public class CollectionExtensionsTests

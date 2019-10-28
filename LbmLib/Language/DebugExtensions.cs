@@ -6,7 +6,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
-namespace LbmLib
+namespace LbmLib.Language
 {
 	public static class DebugLogging
 	{

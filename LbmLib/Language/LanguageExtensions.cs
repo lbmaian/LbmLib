@@ -9,7 +9,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text;
 
-namespace LbmLib
+namespace LbmLib.Language
 {
 	public static class CollectionExtensions
 	{

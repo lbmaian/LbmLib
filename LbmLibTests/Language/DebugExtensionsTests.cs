@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 
-namespace LbmLib.Tests
+namespace LbmLib.Language.Tests
 {
 	[TestFixture]
 	public class DebugExtensionsTests
@@ -153,7 +153,7 @@ namespace LbmLib.Tests
 		[Test]
 		public void ToDebugStringTestCodeInstruction()
 		{
-			object obj = new[] { new Harmony.CodeInstruction(System.Reflection.Emit.OpCodes.Ret) };
+			object obj = new[] { new global::Harmony.CodeInstruction(System.Reflection.Emit.OpCodes.Ret) };
 			Assert.AreEqual("0: ret", obj.ToDebugString());
 		}
 	}

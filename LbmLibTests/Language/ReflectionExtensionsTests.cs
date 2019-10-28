@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 
-namespace LbmLib.Tests
+namespace LbmLib.Language.Tests
 {
 	[TestFixture]
 	public class ReflectionExtensionsTests
