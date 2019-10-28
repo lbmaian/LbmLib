@@ -8,7 +8,7 @@ using System.Text;
 using Harmony;
 using Harmony.ILCopying;
 
-namespace TranslationFilesGenerator.Tools
+namespace LbmLib
 {
 	[AttributeUsage(AttributeTargets.Class)]
 	public class HarmonyDebugAttribute : Attribute

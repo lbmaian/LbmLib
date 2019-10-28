@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace TranslationFilesGenerator.Tools
+namespace LbmLib
 {
 	public static class Logging
 	{

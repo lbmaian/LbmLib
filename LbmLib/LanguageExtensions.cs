@@ -9,7 +9,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text;
 
-namespace TranslationFilesGenerator.Tools
+namespace LbmLib
 {
 	public static class CollectionExtensions
 	{

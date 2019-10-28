@@ -7,9 +7,9 @@
     <ProjectGuid>{5EB39975-FF2B-4306-A737-7FD09401FFC0}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>TranslationFilesGenerator</RootNamespace>
-    <AssemblyName>TranslationFilesGenerator</AssemblyName>
-    <NoStdLib>True</NoStdLib>
+    <RootNamespace>LbmLib</RootNamespace>
+    <AssemblyName>LbmLib</AssemblyName>
+    <NoStdLib>False</NoStdLib>
     <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
@@ -28,7 +28,7 @@
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>none</DebugType>
     <Optimize>true</Optimize>
-    <OutputPath>..\..\Assemblies\</OutputPath>
+    <OutputPath>..\dist\</OutputPath>
     <DefineConstants>
     </DefineConstants>
     <ErrorReport>prompt</ErrorReport>
@@ -38,53 +38,16 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="0Harmony">
-      <HintPath>..\..\..\HugsLib\Assemblies\0Harmony.dll</HintPath>
+      <HintPath>..\dist\0Harmony.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="Assembly-CSharp">
-      <HintPath>..\..\..\..\RimWorldWin64_Data\Managed\Assembly-CSharp.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="mscorlib">
-      <HintPath>..\..\..\..\RimWorldWin64_Data\Managed\mscorlib.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="System">
-      <HintPath>..\..\..\..\RimWorldWin64_Data\Managed\System.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="System.Core">
-      <HintPath>..\..\..\..\RimWorldWin64_Data\Managed\System.Core.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="System.Xml">
-      <HintPath>..\..\..\..\RimWorldWin64_Data\Managed\System.Xml.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="System.Xml.Linq">
-      <HintPath>..\..\..\..\RimWorldWin64_Data\Managed\System.Xml.Linq.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="UnityEngine">
-      <HintPath>..\..\..\..\RimWorldWin64_Data\Managed\UnityEngine.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\..\**\*" Exclude="..\..\.git\**\*;..\..\Source\**\*">
-      <Link>!ModFolder\%(RecursiveDir)%(FileName)%(Extension)</Link>
-    </Content>
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Include="Tools\DebugExtensions.cs" />
-    <Compile Include="HarmonyPatches.cs" />
-    <Compile Include="Tools\HarmonyTranspilerExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Tools\LanguageExtensions.cs" />
-    <Compile Include="Tools\Logging.cs" />
-    <Compile Include="Tools\RimWorldExtensions.cs" />
-    <Compile Include="TranslationFilesGenerator.cs" />
-    <Compile Include="TranslationFilesGeneratorMod.cs" />
+    <Compile Include="DebugExtensions.cs" />
+    <Compile Include="HarmonyTranspilerExtensions.cs" />
+    <Compile Include="LanguageExtensions.cs" />
+    <Compile Include="Logging.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">

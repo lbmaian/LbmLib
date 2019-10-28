@@ -1,6 +1,6 @@
-Source/**/bin
-Source/**/obj
-Source/**/packages
+**/bin
+**/obj
+**/packages
 .vs
 .vscode
 *.csproj.user

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 
-namespace TranslationFilesGenerator.Tools.Tests
+namespace LbmLib.Tests
 {
 	[TestFixture]
 	public class ReflectionExtensionsTests
