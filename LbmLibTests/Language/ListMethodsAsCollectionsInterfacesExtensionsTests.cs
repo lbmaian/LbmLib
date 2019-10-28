@@ -4,7 +4,7 @@ using NUnit.Framework;
 namespace LbmLib.Language.Tests
 {
 	[TestFixture]
-	public class CollectionExtensionsTests
+	public class ListMethodsAsCollectionsInterfacesExtensionsTests
 	{
 		[Test]
 		public void FindIndexTest()

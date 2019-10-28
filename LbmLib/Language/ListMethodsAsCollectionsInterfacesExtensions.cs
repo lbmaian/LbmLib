@@ -5,7 +5,6 @@ using System.Linq;
 
 namespace LbmLib.Language
 {
-	// TODO: Rename file to ListMethodsAsCollectionsInterfacesExtensions.cs
 	public static class ListMethodsAsCollectionsInterfacesExtensions
 	{
 		public static ReadOnlyCollection<T> AsReadOnly<T>(this IList<T> list)
