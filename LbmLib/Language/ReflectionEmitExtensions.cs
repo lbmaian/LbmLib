@@ -5,7 +5,7 @@ namespace LbmLib.Language
 {
 	public static class ReflectionEmitExtensions
 	{
-		public static bool CanEmitConstant(this ILGenerator ilGenerator, object argument)
+		public static bool CanEmitConstant(this ILGenerator _, object argument)
 		{
 			if (argument is null)
 				return false;

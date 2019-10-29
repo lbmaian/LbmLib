@@ -162,6 +162,7 @@ namespace LbmLib.Language.Experimental
 
 		public static MethodInfo DynamicPartialApply(this MethodInfo method, params object[] fixedArguments)
 		{
+			// TODO: Special case if method is already a ClosureMethod.
 			return CreateClosureMethod(method, null, fixedArguments);
 		}
 
@@ -309,7 +310,10 @@ namespace LbmLib.Language.Experimental
 			var closureMethod = methodBuilder.GetMethod();
 			Logging.Log($"DEBUG ClosureMethod: closureKey={closureKey} created closureMethod={closureMethod.ToDebugString()}");
 
-			return new ClosureMethod(closureKey, closureMethod, methodBuilder.GetMethodHandle(closureMethod), method.Attributes,
+			// TODO: Do we actually need a RuntimeMethodHandle, if it can't reference the wrapper ClosureMethod,
+			// thus breaking the contract of MethodBase.GetMethodFromHandle(method.MethodHandle) == method?
+			var methodHandle = methodBuilder.GetMethodHandle(closureMethod);
+			return new ClosureMethod(closureKey, closureMethod, methodHandle, method.Attributes,
 				nonFixedParameterInfos, fixedThisObject, fixedNonConstantArguments);
 		}
 
@@ -453,7 +457,7 @@ namespace LbmLib.Language.Experimental
 				var fileName = methodBuilder.Name + ".dll";
 				assemblyBuilder.Save(fileName);
 				Logging.Log("Saved dynamically created partial applied method to " + Path.Combine(dirPath, fileName));
-				// MethodBuilder doesn't have a RuntimeMethodHandle, so get the built method from typeBuilder.
+				// A MethodBuilder can't be Invoke'd (nor can its MethodHandle be obtained), so get the concrete method from the just-built type.
 				return typeBuilder.GetMethod(methodBuilder.Name, parameterTypes);
 			}
 

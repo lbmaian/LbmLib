@@ -4,7 +4,7 @@ using Harmony;
 namespace LbmLib.Harmony
 {
 	[AttributeUsage(AttributeTargets.Class)]
-	public class HarmonyDebugAttribute : Attribute
+	public sealed class HarmonyDebugAttribute : Attribute
 	{
 	}
 

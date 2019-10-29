@@ -119,5 +119,9 @@ namespace LbmLib.Language.Experimental.Tests
 		// TODO: Test DynamicBind on DynamicPartialApply on static method => throws exception.
 
 		// TODO: Test DynamicBind on DynamicPartialApply on instance method.
+
+		// TODO: Test DynamicPartialApply on DynamicPartialApply
+
+		// TODO: Test DynamicPartialApply on DynamicBind
 	}
 }
