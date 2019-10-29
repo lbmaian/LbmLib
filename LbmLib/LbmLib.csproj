@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ProjectGuid>{5EB39975-FF2B-4306-A737-7FD09401FFC0}</ProjectGuid>
-    <NoStdLib>False</NoStdLib>
     <TargetFrameworks>net35;net45;net472</TargetFrameworks>
     <LangVersion>7.3</LangVersion>
     <AssemblyTitle>LbmLib</AssemblyTitle>
@@ -21,6 +20,6 @@
     <DefineConstants />
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Lib.Harmony" Version="1.2.0.1" />
+    <PackageReference Include="Lib.Harmony" Version="1.2.0.1" ExcludeAssets="runtime" />
   </ItemGroup>
 </Project>
