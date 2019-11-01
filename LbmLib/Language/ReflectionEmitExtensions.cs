@@ -8,7 +8,7 @@ namespace LbmLib.Language
 		public static bool CanEmitConstant(this ILGenerator _, object argument)
 		{
 			if (argument is null)
-				return false;
+				return true;
 			switch (Type.GetTypeCode(argument.GetType()))
 			{
 			case TypeCode.Boolean:
@@ -24,9 +24,9 @@ namespace LbmLib.Language
 			case TypeCode.Single:
 			case TypeCode.Double:
 			case TypeCode.String:
-				return false;
+				return true;
 			}
-			return true;
+			return false;
 		}
 
 		public static bool TryEmitConstant(this ILGenerator ilGenerator, object argument)
@@ -192,10 +192,10 @@ namespace LbmLib.Language
 				ilGenerator.Emit(OpCodes.Ldarg_1);
 				break;
 			case 2:
-				ilGenerator.Emit(OpCodes.Ldarg_1);
+				ilGenerator.Emit(OpCodes.Ldarg_2);
 				break;
 			case 3:
-				ilGenerator.Emit(OpCodes.Ldarg_1);
+				ilGenerator.Emit(OpCodes.Ldarg_3);
 				break;
 			default:
 				if (index <= byte.MaxValue)
