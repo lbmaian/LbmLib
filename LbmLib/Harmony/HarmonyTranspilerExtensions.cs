@@ -13,18 +13,18 @@ namespace LbmLib.Harmony
 {
 	public class TranspilerContext<T>
 	{
-		public readonly ILGenerator Generator;
+		public readonly ILGenerator ILGenerator;
 		public readonly MethodBase Method;
 		public readonly List<T> Instructions;
 
-		public TranspilerContext(ILGenerator generator, MethodBase method, IEnumerable instructions) :
-			this(generator, method, instructions.AsList<T>())
+		public TranspilerContext(ILGenerator ilGenerator, MethodBase method, IEnumerable instructions) :
+			this(ilGenerator, method, instructions.AsList<T>())
 		{
 		}
 
-		public TranspilerContext(ILGenerator generator, MethodBase method, List<T> instructions)
+		public TranspilerContext(ILGenerator ilGenerator, MethodBase method, List<T> instructions)
 		{
-			Generator = generator;
+			ILGenerator = ilGenerator;
 			Method = method;
 			Instructions = instructions;
 		}
@@ -186,30 +186,33 @@ namespace LbmLib.Harmony
 		// Replaces ldloc.<num>/stloc.<num> instructions with ldloc.s/stloc.s instructions with (potentially dummy) LocalBuilder operands.
 		// This allows searching instructions for any local variable access via ldloc.s/stloc.s (assuming there's no ldloc/stloc, which is usually a safe assumption).
 		// Ensure that ReoptimizeLocalVarInstructions is called afterwards to reverts ldloc.s/stloc.s instructions back to ldloc.<num>/stloc.<num> instructions.
-		// Returns the passed (and changed) instructions for convenience.
-		public static IEnumerable<CodeInstruction> DeoptimizeLocalVarInstructions(this IEnumerable<CodeInstruction> instructions, MethodBase method, ILGenerator ilGenerator)
+		public static void DeoptimizeLocalVarInstructions(this TranspilerContext<CodeInstruction> context)
 		{
 			var localBuilders = default(LocalBuilder[]);
 			// Mono .NET mscorlib implementation of ILGenerator has a LocalBuilder[] field we can use.
-			if (ilGenerator.GetType().GetFields(AccessTools.all).Where(field => field.FieldType == typeof(LocalBuilder[])).FirstOrDefault() is FieldInfo localBuildersField)
+			if (context.ILGenerator.GetType().GetFields(AccessTools.all)
+				.Where(field => field.FieldType == typeof(LocalBuilder[]))
+				.FirstOrDefault() is FieldInfo localBuildersField)
 			{
-				localBuilders = (LocalBuilder[])localBuildersField.GetValue(ilGenerator);
+				localBuilders = (LocalBuilder[])localBuildersField.GetValue(context.ILGenerator);
 			}
 			else
 			{
 				// Assume we're using MS .NET Framework mscorlib implementation. We'll have to construct dummy LocalBuilder's.
-				var localBuilderConstructor = typeof(LocalBuilder).GetConstructor(AccessTools.all, null, new[] { typeof(int), typeof(Type), typeof(MethodInfo), typeof(bool) }, null);
+				var localBuilderConstructor = typeof(LocalBuilder).GetConstructor(AccessTools.all, null,
+					new[] { typeof(int), typeof(Type), typeof(MethodInfo), typeof(bool) }, null);
 				if (localBuilderConstructor is null)
 					throw new InvalidOperationException("Could find neither existing LocalBuilder's on ILGenerator nor an expected LocalBuilder constructor");
-				var localVars = method.GetMethodBody().LocalVariables;
+				var localVars = context.Method.GetMethodBody().LocalVariables;
 				localBuilders = new LocalBuilder[Math.Min(4, localVars.Count)];
 				for (var localVarIndex = 0; localVarIndex < localBuilders.Length; localVarIndex++)
 				{
 					var localVar = localVars[localVarIndex];
-					localBuilders[localVarIndex] = (LocalBuilder)localBuilderConstructor.Invoke(new object[] { localVar.LocalIndex, localVar.LocalType, method, localVar.IsPinned });
+					localBuilders[localVarIndex] = (LocalBuilder)localBuilderConstructor.Invoke(
+						new object[] { localVar.LocalIndex, localVar.LocalType, context.Method, localVar.IsPinned });
 				}
 			}
-			foreach (var instruction in instructions)
+			foreach (var instruction in context.Instructions)
 			{
 				var opcode = instruction.opcode;
 				var localVarIndex = -1;
@@ -230,7 +233,6 @@ namespace LbmLib.Harmony
 					instruction.operand = localBuilders[localVarIndex];
 				}
 			}
-			return instructions;
 		}
 
 		static readonly OpCode[] LdlocNumOpCodes =
@@ -251,10 +253,9 @@ namespace LbmLib.Harmony
 
 		// The inverse of DeoptimizeLocalVarInstructions that should be called after all changes to instructions are done,
 		// to revert ldloc.s/stloc.s instructions back to ldloc.<num>/stloc.<num> instructions and remove the potentially dummy LocalBuilder operands.
-		// Returns the passed (and changed) instructions for convenience.
-		public static IEnumerable<CodeInstruction> ReoptimizeLocalVarInstructions(this IEnumerable<CodeInstruction> instructions)
+		public static void ReoptimizeLocalVarInstructions(this TranspilerContext<CodeInstruction> context)
 		{
-			foreach (var instruction in instructions)
+			foreach (var instruction in context.Instructions)
 			{
 				var opcode = instruction.opcode;
 				if (opcode == OpCodes.Ldloc_S || opcode == OpCodes.Stloc_S)
@@ -271,17 +272,15 @@ namespace LbmLib.Harmony
 					}
 				}
 			}
-			return instructions;
 		}
 
-		public static void AddTryFinally(this IList<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
-			IList<CodeInstruction> finallyInstructions)
+		public static void AddTryFinally(this TranspilerContext<CodeInstruction> context, IList<CodeInstruction> finallyInstructions)
 		{
-			AddTryFinally(methodInstructions, method, ilGenerator, 0, methodInstructions.Count, finallyInstructions);
+			context.AddTryFinally(0, context.Instructions.Count, finallyInstructions);
 		}
 
-		public static void AddTryFinally(this IList<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
-			int tryStartIndex, int finallyInsertIndex, IList<CodeInstruction> finallyBlockInstructions)
+		public static void AddTryFinally(this TranspilerContext<CodeInstruction> context, int tryStartIndex, int finallyInsertIndex,
+			IList<CodeInstruction> finallyBlockInstructions)
 		{
 			if (tryStartIndex >= finallyInsertIndex)
 				throw new ArgumentException($"tryStartIndex ({tryStartIndex}) cannot be >= finallyInsertIndex ({finallyInsertIndex})");
@@ -289,14 +288,15 @@ namespace LbmLib.Harmony
 				throw new ArgumentException($"finallyBlockInstructions.Count ({finallyBlockInstructions.Count}) cannot be 0");
 			if (tryStartIndex < 0)
 				throw new ArgumentOutOfRangeException($"tryStartIndex ({tryStartIndex}) cannot be < 0");
-			var instructionCount = methodInstructions.Count;
+			var instructions = context.Instructions;
+			var instructionCount = instructions.Count;
 			if (finallyInsertIndex > instructionCount)
-				throw new ArgumentOutOfRangeException($"finallyInsertIndex ({finallyInsertIndex}) cannot be > methodInstructions.Count ({instructionCount})");
+				throw new ArgumentOutOfRangeException($"finallyInsertIndex ({finallyInsertIndex}) cannot be > context.Instructions.Count ({instructionCount})");
 
 			var labelsWithinTryBlock = new HashSet<Label>();
 			for (var index = tryStartIndex; index < finallyInsertIndex; index++)
 			{
-				foreach (var label in methodInstructions[index].labels)
+				foreach (var label in instructions[index].labels)
 					labelsWithinTryBlock.Add(label);
 			}
 
@@ -319,25 +319,25 @@ namespace LbmLib.Harmony
 			// Validate that branch instructions outside the try block cannot target inside the try block.
 			// It's the caller's responsibility to ensure this validation succeeds.
 			foreach (var labelRef in Enumerable.Concat(
-				InvalidBranchInstructions(methodInstructions, "methodInstructions", 0, tryStartIndex, invalidLabels: labelsWithinTryBlock),
-				InvalidBranchInstructions(methodInstructions, "methodInstructions", finallyInsertIndex, instructionCount, invalidLabels: labelsWithinTryBlock)))
+				InvalidBranchInstructions(instructions, "context.Instructions", 0, tryStartIndex, invalidLabels: labelsWithinTryBlock),
+				InvalidBranchInstructions(instructions, "context.Instructions", finallyInsertIndex, instructionCount, invalidLabels: labelsWithinTryBlock)))
 			{
-				throw new ArgumentException($"methodInstructions[{labelRef.Index}] '{labelRef.Instruction.ToDebugString()}' targets a label inside try block: " +
+				throw new ArgumentException($"context.Instructions[{labelRef.Index}] '{labelRef.Instruction.ToDebugString()}' targets a label inside try block: " +
 					labelRef.Label.ToDebugString());
 			}
 
 			// Mark start of the try block.
-			methodInstructions[tryStartIndex].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock, null));
+			instructions[tryStartIndex].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginExceptionBlock, null));
 
 			// It's possible for a method to end in a tail call with no ret. To simplify the analysis done in ConvertToLeaveInstructions,
 			// if the last instruction is a tail call and the finally block will be inserted at the end of the method, insert a ret at the end of the method.
 			if (finallyInsertIndex == instructionCount && instructionCount >= 2)
 			{
-				var lastInstructionOpcode = methodInstructions[instructionCount - 1].opcode;
+				var lastInstructionOpcode = instructions[instructionCount - 1].opcode;
 				if ((lastInstructionOpcode == OpCodes.Call || lastInstructionOpcode == OpCodes.Callvirt || lastInstructionOpcode == OpCodes.Calli) &&
-					methodInstructions[instructionCount - 2].opcode == OpCodes.Tailcall)
+					instructions[instructionCount - 2].opcode == OpCodes.Tailcall)
 				{
-					methodInstructions.Add(new CodeInstruction(OpCodes.Ret));
+					instructions.Add(new CodeInstruction(OpCodes.Ret));
 					finallyInsertIndex++;
 					// Note: instructionCount is not used after this, so no need to increment it.
 				}
@@ -345,14 +345,14 @@ namespace LbmLib.Harmony
 
 			// Convert ret instructions in the try block into leave instructions to a final ret at the end of the method
 			// (and thus also after the finally block instructions) with additional return value tracking if method has return type.
-				ConvertToLeaveInstructions(methodInstructions, method, ilGenerator, tryStartIndex, ref finallyInsertIndex, OpCodes.Ret, allowReturnValueTracking: true);
+			ConvertToLeaveInstructions(context, tryStartIndex, ref finallyInsertIndex, OpCodes.Ret, allowReturnValueTracking: true);
 
 			// Convert jmp instructions in the try block into leave instructions to a final jmp at the end of the method.
-			ConvertToLeaveInstructions(methodInstructions, method, ilGenerator, tryStartIndex, ref finallyInsertIndex, OpCodes.Jmp, allowReturnValueTracking: false);
+			ConvertToLeaveInstructions(context, tryStartIndex, ref finallyInsertIndex, OpCodes.Jmp, allowReturnValueTracking: false);
 
 			// If last instruction in try block isn't a leave or throw instruction by now, insert a leave instruction to current instruction at finallyInsertIndex.
-			var lastTryBlockInstruction = methodInstructions[finallyInsertIndex - 1];
-			var afterExceptionBlockLabel = methodInstructions[finallyInsertIndex].FirstOrNewAddedLabel(ilGenerator);
+			var lastTryBlockInstruction = instructions[finallyInsertIndex - 1];
+			var afterExceptionBlockLabel = instructions[finallyInsertIndex].FirstOrNewAddedLabel(context.ILGenerator);
 			if (!lastTryBlockInstruction.opcode.EqualsIgnoreForm(OpCodes.Leave) && !lastTryBlockInstruction.opcode.EqualsIgnoreForm(OpCodes.Throw))
 			{
 				if (lastTryBlockInstruction.opcode == OpCodes.Nop)
@@ -362,7 +362,7 @@ namespace LbmLib.Harmony
 				else
 				{
 					lastTryBlockInstruction = new CodeInstruction(OpCodes.Leave, afterExceptionBlockLabel);
-					methodInstructions.Insert(finallyInsertIndex, lastTryBlockInstruction);
+					instructions.Insert(finallyInsertIndex, lastTryBlockInstruction);
 					finallyInsertIndex++;
 				}
 			}
@@ -370,13 +370,13 @@ namespace LbmLib.Harmony
 			// Convert branch instructions within the try block that target outside the try block into leave instructions.
 			// Since there are no conditional leave instructions, each conditional branch is instead redirected to a new leave instruction with the same label,
 			// inserted at the end of the try block. Same applies for each target in a switch jump table.
-			foreach (var labelRef in InvalidBranchInstructions(methodInstructions, "methodInstructions", tryStartIndex, finallyInsertIndex, validLabels: labelsWithinTryBlock))
+			foreach (var labelRef in InvalidBranchInstructions(instructions, "instructions", tryStartIndex, finallyInsertIndex, validLabels: labelsWithinTryBlock))
 			{
 				if (labelRef.Instruction.opcode.FlowControl == FlowControl.Cond_Branch)
 				{
 
-					var newLeaveLabel = ilGenerator.DefineLabel();
-					methodInstructions.Insert(finallyInsertIndex, new CodeInstruction(OpCodes.Leave, afterExceptionBlockLabel) { labels = { newLeaveLabel } });
+					var newLeaveLabel = context.ILGenerator.DefineLabel();
+					instructions.Insert(finallyInsertIndex, new CodeInstruction(OpCodes.Leave, afterExceptionBlockLabel) { labels = { newLeaveLabel } });
 					finallyInsertIndex++;
 					labelRef.Label = newLeaveLabel;
 				}
@@ -390,7 +390,7 @@ namespace LbmLib.Harmony
 			// Insert finally block instructions. First instruction is marked as start of finally block.
 			// If last instruction in finally block isn't throw, add endfinally instruction. Mark last instruction as end of try block.
 			finallyBlockInstructions[0].blocks.Add(new ExceptionBlock(ExceptionBlockType.BeginFinallyBlock, null));
-			methodInstructions.InsertRange(finallyInsertIndex, finallyBlockInstructions);
+			instructions.InsertRange(finallyInsertIndex, finallyBlockInstructions);
 			var lastFinallyBlockInstruction = finallyBlockInstructions[finallyInstructionCount - 1];
 			if (lastFinallyBlockInstruction.opcode == OpCodes.Nop)
 			{
@@ -399,7 +399,7 @@ namespace LbmLib.Harmony
 			else if (lastFinallyBlockInstruction.opcode != OpCodes.Throw)
 			{
 				lastFinallyBlockInstruction = new CodeInstruction(OpCodes.Endfinally);
-				methodInstructions.Insert(finallyInsertIndex + finallyInstructionCount, lastFinallyBlockInstruction);
+				instructions.Insert(finallyInsertIndex + finallyInstructionCount, lastFinallyBlockInstruction);
 			}
 			lastFinallyBlockInstruction.blocks.Add(new ExceptionBlock(ExceptionBlockType.EndExceptionBlock, null));
 
@@ -518,8 +518,8 @@ namespace LbmLib.Harmony
 			}
 		}
 
-		static void ConvertToLeaveInstructions(IList<CodeInstruction> methodInstructions, MethodBase method, ILGenerator ilGenerator,
-			int tryStartIndex, ref int finallyInsertIndex, OpCode opcodeToConvert, bool allowReturnValueTracking)
+		static void ConvertToLeaveInstructions(TranspilerContext<CodeInstruction> context, int tryStartIndex, ref int finallyInsertIndex,
+			OpCode opcodeToConvert, bool allowReturnValueTracking)
 		{
 			// Note: Replace all "ret" in the following comments with "opcodeToConvert", as this is also used to convert "jmp" instructions.
 			// Need to search the try block range and convert any ret instructions to leave instructions to a ret instruction at the end of the method,
@@ -527,49 +527,50 @@ namespace LbmLib.Harmony
 			// Note: If the try block range is the whole method, then either the method contains at least one ret instruction or it only has throw instructions.
 			// In the latter case, there doesn't even need to be anything after the finally instructions.
 			var equalsOpcodeToConvertPredicate = new Func<CodeInstruction, bool>(instruction => instruction.opcode.EqualsIgnoreForm(opcodeToConvert));
-			var instructionCount = methodInstructions.Count;
+			var instructions = context.Instructions;
+			var instructionCount = instructions.Count;
 			var searchIndex = tryStartIndex;
-			var index = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex, equalsOpcodeToConvertPredicate);
+			var index = instructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex, equalsOpcodeToConvertPredicate);
 			if (index != -1)
 			{
 				var finalLabel = default(Label?);
 				// If method has void return type (constructor is treated as having void return type)...
-				var returnType = (allowReturnValueTracking ? (method as MethodInfo)?.ReturnType : null) ?? typeof(void);
+				var returnType = (allowReturnValueTracking ? (context.Method as MethodInfo)?.ReturnType : null) ?? typeof(void);
 				if (returnType == typeof(void))
 				{
 					// If any ret instruction exists in the range, at the end of the method, ensure there is a final final ret instruction.
 					// Determine whether a final ret instruction that has an existing leave pointing to it already exists.
 					if (instructionCount >= 1)
 					{
-						var finalReturnIndex = methodInstructions.FindLastIndex(instructionCount - 1, instructionCount - finallyInsertIndex,
+						var finalReturnIndex = instructions.FindLastIndex(instructionCount - 1, instructionCount - finallyInsertIndex,
 							instruction => equalsOpcodeToConvertPredicate(instruction) && instruction.labels.Count > 0);
 						if (finalReturnIndex != -1)
 						{
-							var finalReturnInstruction = methodInstructions[finalReturnIndex];
-							var leaveIndex = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex,
+							var finalReturnInstruction = instructions[finalReturnIndex];
+							var leaveIndex = instructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex,
 								instruction => instruction.opcode.EqualsIgnoreForm(OpCodes.Leave) && finalReturnInstruction.labels.Any(label => instruction.labels.Contains(label)));
 							if (leaveIndex != -1)
 							{
-								finalLabel = (Label)methodInstructions[leaveIndex].operand;
+								finalLabel = (Label)instructions[leaveIndex].operand;
 							}
 						}
 					}
 					// If it doesn't exist, add the final ret instruction.
 					if (finalLabel is null)
 					{
-						finalLabel = ilGenerator.DefineLabel();
-						methodInstructions.Add(new CodeInstruction(opcodeToConvert) { labels = { finalLabel.Value } });
+						finalLabel = context.ILGenerator.DefineLabel();
+						instructions.Add(new CodeInstruction(opcodeToConvert) { labels = { finalLabel.Value } });
 						// Don't advance finallyInsertIndex, since the finally block will go before these added instructions.
 					}
 
 					// Existing ret instructions in the range will be turned into a leave to the final ret instruction.
 					do
 					{
-						methodInstructions[index].SetTo(OpCodes.Leave, finalLabel.Value);
+						instructions[index].SetTo(OpCodes.Leave, finalLabel.Value);
 						searchIndex = index + 1;
 						if (searchIndex >= finallyInsertIndex)
 							break;
-						index = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - searchIndex, equalsOpcodeToConvertPredicate);
+						index = instructions.FindIndex(searchIndex, finallyInsertIndex - searchIndex, equalsOpcodeToConvertPredicate);
 					}
 					while (index != -1);
 				}
@@ -581,30 +582,30 @@ namespace LbmLib.Harmony
 					// followed by a ret instruction. Determine whether a final ldloc.s + ret instruction that has an existing stloc.s + leave pointing to it already exists.
 					if (instructionCount >= 1)
 					{
-						var finalReturnIndex = methodInstructions.FindLastIndex(instructionCount - 1, instructionCount - finallyInsertIndex,
+						var finalReturnIndex = instructions.FindLastIndex(instructionCount - 1, instructionCount - finallyInsertIndex,
 							instruction => instruction.opcode == OpCodes.Ldloc_S && instruction.labels.Count > 0,
 							equalsOpcodeToConvertPredicate);
 						if (finalReturnIndex != -1)
 						{
-							var finalReturnValueStoreInstruction = methodInstructions[finalReturnIndex];
-							var finalReturnInstruction = methodInstructions[finalReturnIndex + 1];
-							var leaveIndex = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex,
+							var finalReturnValueStoreInstruction = instructions[finalReturnIndex];
+							var finalReturnInstruction = instructions[finalReturnIndex + 1];
+							var leaveIndex = instructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex,
 								instruction => instruction.opcode == OpCodes.Stloc_S && instruction.operand == finalReturnValueStoreInstruction.operand,
 								instruction => instruction.opcode.EqualsIgnoreForm(OpCodes.Leave) &&
 									finalReturnInstruction.labels.Any(label => instruction.labels.Contains(label)));
 							if (leaveIndex != -1)
 							{
-								returnValueVar = (LocalBuilder)methodInstructions[leaveIndex].operand;
-								finalLabel = (Label)methodInstructions[leaveIndex + 1].operand;
+								returnValueVar = (LocalBuilder)instructions[leaveIndex].operand;
+								finalLabel = (Label)instructions[leaveIndex + 1].operand;
 							}
 						}
 					}
 					// If it doesn't exist, add the final ldloc.s + ret instruction, declaring a new var for the ldloc.s instruction.
 					if (finalLabel is null)
 					{
-						returnValueVar = ilGenerator.DeclareLocal(returnType);
-						finalLabel = ilGenerator.DefineLabel();
-						methodInstructions.AddRange(new[]
+						returnValueVar = context.ILGenerator.DeclareLocal(returnType);
+						finalLabel = context.ILGenerator.DefineLabel();
+						instructions.AddRange(new[]
 						{
 							new CodeInstruction(OpCodes.Ldloc_S, returnValueVar) { labels = { finalLabel.Value } },
 							new CodeInstruction(opcodeToConvert),
@@ -615,13 +616,13 @@ namespace LbmLib.Harmony
 					// Existing ret instructions in the range will be turned into a stloc.s to the new return value variable, then a leave to the final ldloc.s instruction.
 					do
 					{
-						methodInstructions[index].SetTo(OpCodes.Stloc_S, returnValueVar);
-						methodInstructions.Insert(index + 1, new CodeInstruction(OpCodes.Leave, finalLabel.Value));
+						instructions[index].SetTo(OpCodes.Stloc_S, returnValueVar);
+						instructions.Insert(index + 1, new CodeInstruction(OpCodes.Leave, finalLabel.Value));
 						finallyInsertIndex++;
 						searchIndex = index + 2;
 						if (searchIndex >= finallyInsertIndex)
 							break;
-						index = methodInstructions.FindIndex(searchIndex, finallyInsertIndex - searchIndex, equalsOpcodeToConvertPredicate);
+						index = instructions.FindIndex(searchIndex, finallyInsertIndex - searchIndex, equalsOpcodeToConvertPredicate);
 					}
 					while (index != -1);
 				}

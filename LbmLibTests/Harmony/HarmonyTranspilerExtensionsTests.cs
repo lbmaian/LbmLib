@@ -85,11 +85,11 @@ namespace LbmLib.Harmony.Tests
 
 		public static IEnumerable<CodeInstruction> TestTryFinallyTranspiler(IEnumerable<CodeInstruction> instructionEnumerable, MethodBase method, ILGenerator ilGenerator)
 		{
-			var instructions = instructionEnumerable.AsList();
+			var context = new TranspilerContext<CodeInstruction>(ilGenerator, method, instructionEnumerable);
+			var instructions = context.Instructions;
 			instructions.ToDebugString().Log("before");
-			instructions.AddTryFinally(method, ilGenerator, HarmonyTranspilerDebugExtensions.StringLogInstructions("hello world"));
+			context.AddTryFinally(HarmonyTranspilerDebugExtensions.StringLogInstructions("hello world"));
 			instructions.ToDebugString().Log("after");
-			
 			return instructions;
 		}
 
@@ -119,12 +119,13 @@ namespace LbmLib.Harmony.Tests
 
 		public static IEnumerable<CodeInstruction> TestDeReOptimizeLocalVarTranspiler(IEnumerable<CodeInstruction> instructionEnumerable, MethodBase method, ILGenerator ilGenerator)
 		{
-			var origInstructions = instructionEnumerable.ToList();
-			var instructions = instructionEnumerable.AsList();
+			var context = new TranspilerContext<CodeInstruction>(ilGenerator, method, instructionEnumerable);
+			var origInstructions = context.Instructions.ToList();
+			var instructions = context.Instructions;
 			instructions.ToDebugString().Log("before deoptimize");
-			instructions.DeoptimizeLocalVarInstructions(method, ilGenerator);
+			context.DeoptimizeLocalVarInstructions();
 			instructions.ToDebugString().Log("after deoptimize");
-			instructions.ReoptimizeLocalVarInstructions();
+			context.ReoptimizeLocalVarInstructions();
 			instructions.ToDebugString().Log("after reoptimize");
 			CollectionAssert.AreEqual(origInstructions, instructions);
 			instructions.SafeInsertRange(instructions.Count - 1, HarmonyTranspilerDebugExtensions.StringLogInstructions("hello world"));
