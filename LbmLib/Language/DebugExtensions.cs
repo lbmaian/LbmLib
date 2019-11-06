@@ -5,12 +5,19 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Microsoft.CSharp;
+
+#if !NET35
+using TypeDebugStringKey = System.Tuple<System.Type, bool, bool>;
+#endif
 
 namespace LbmLib.Language
 {
 	public static class DebugExtensions
 	{
 		// TODO: See if the following custom function overload resolution logic could all be simplfied by using Type.DefaultBinder.
+		// TODO: Support ToDebugString overloads with default arguments.
+		// TODO: Support ToDebugString with delimiter and indent arguments that affect ToDebugString(IEnumerable) and passthrough other overloads?
 		// The following is all a workaround for C# extension methods not supporting late binding for function overload resolution:
 		// Specifically, use a custom dynamic dispatch algorithm in static string ToDebugString(this object obj).
 		// This is not a full-featured single parameter function overload resolution algorithm but it suffices for most uses cases.
@@ -298,40 +305,159 @@ namespace LbmLib.Language
 			return str;
 		}
 
+		// TODO: Combine ToDebugString(IEnumerable) overloads when default arguments are supported.
 		public static string ToDebugString(this IEnumerable enumerable)
 		{
-			if (enumerable is null)
-				return "null";
-			return enumerable.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " {" + enumerable.Join() + "}";
+			return enumerable.ToDebugString(", ");
 		}
 
+		public static string ToDebugString(this IEnumerable enumerable, string delimiter, bool includeEnumerableTypeBraces = true)
+		{
+			if (enumerable is null)
+				return "null";
+			var str = enumerable.NonGenericIEnumerableSelect(item => item.ToDebugString()).Join(delimiter);
+			if (!includeEnumerableTypeBraces)
+				return str;
+			var braceDelimiter = delimiter.Contains('\n') ? delimiter : " ";
+			return enumerable.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " {" + braceDelimiter + str + braceDelimiter + "}";
+		}
+
+		static IEnumerable<T> NonGenericIEnumerableSelect<T>(this IEnumerable enumerable, Func<object, T> selector)
+		{
+			foreach (var item in enumerable)
+				yield return selector(item);
+		}
+
+		// TODO: Combine ToDebugString<T>(IEnumerable<T>) overloads when default arguments are supported.
 		public static string ToDebugString<T>(this IEnumerable<T> enumerable)
 		{
-			if (enumerable is null)
-				return "null";
-			return enumerable.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " { " + enumerable.Join() + " }";
+			return enumerable.ToDebugString(", ");
 		}
 
-		static readonly Dictionary<Type, string> TypeToDebugStringCache = new Dictionary<Type, string>()
+		public static string ToDebugString<T>(this IEnumerable<T> enumerable, string delimiter, bool includeEnumerableTypeBraces = true)
 		{
-			{ typeof(void), "void" },
-			{ typeof(object), "object" },
-			{ typeof(string), "string" },
-			{ typeof(bool), "bool" },
-			{ typeof(byte), "byte" },
-			{ typeof(sbyte), "sbyte" },
-			{ typeof(short), "short" },
-			{ typeof(ushort), "ushort" },
-			{ typeof(int), "int" },
-			{ typeof(uint), "uint" },
-			{ typeof(long), "long" },
-			{ typeof(ulong), "ulong" },
-			{ typeof(char), "char" },
-			{ typeof(float), "float" },
-			{ typeof(double), "double" },
-			{ typeof(decimal), "decimal" },
-		};
+			if (enumerable is null)
+				return "null";
+			var str = enumerable.Select(item => item.ToDebugString()).Join(delimiter);
+			if (!includeEnumerableTypeBraces)
+				return str;
+			var braceDelimiter = delimiter.Contains('\n') ? delimiter : " ";
+			return enumerable.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " {" + braceDelimiter + str + braceDelimiter + "}";
+		}
 
+		public static string ToDebugString(this DictionaryEntry dictionaryEntry)
+		{
+			return dictionaryEntry.Key.ToDebugString() + "=" + dictionaryEntry.Value.ToDebugString();
+		}
+
+		public static string ToDebugString<K, V>(this KeyValuePair<K, V> keyValuePair)
+		{
+			return keyValuePair.Key.ToDebugString() + "=" + keyValuePair.Value.ToDebugString();
+		}
+
+#if !NET35
+		public static string ToDebugString<K, V>(this ConditionalWeakTable<K, V> weakTable, string delimiter = ", ", bool includeEnumerableTypeBraces = true)
+			where K : class
+			where V : class
+		{
+			if (weakTable is null)
+				return "null";
+			// .NET Core 2+ and .NET Standard 2.1+ has ConditionalWeakTable implement IEnumerable.
+			if (weakTable is IEnumerable enumerable)
+				return enumerable.ToDebugString(delimiter, includeEnumerableTypeBraces);
+			var bindingFlags = BindingFlags.Instance | BindingFlags.NonPublic;
+			var weakTableKeysGetMethod = typeof(ConditionalWeakTable<K, V>).GetProperty("Keys", bindingFlags).GetGetMethod(true);
+			var weakTableValuesGetMethod = typeof(ConditionalWeakTable<K, V>).GetProperty("Values", bindingFlags).GetGetMethod(true);
+			var emptyParameters = new object[0];
+			ICollection<K> weakTableKeys;
+			ICollection<V> weakTableValues;
+			do
+			{
+				weakTableKeys = (ICollection<K>)weakTableKeysGetMethod.Invoke(weakTable, emptyParameters);
+				weakTableValues = (ICollection<V>)weakTableValuesGetMethod.Invoke(weakTable, emptyParameters);
+			}
+			while (weakTableKeys.Count != weakTableValues.Count);
+			var weakTableEnumerable = Enumerable.Zip(weakTableKeys, weakTableValues, (key, value) => new KeyValuePair<K, V>(key, value));
+			return weakTableEnumerable.ToDebugString(delimiter, includeEnumerableTypeBraces);
+		}
+#endif
+
+#if NET35
+		// .NET 3.5 doesn't have Tuple, so we have to define our own for (Type Type, bool IncludeNamespace, bool IncludeDeclaringType).
+		struct TypeDebugStringKey : IEquatable<TypeDebugStringKey>
+		{
+			public Type Type;
+			public bool IncludeNamespace;
+			public bool IncludeDeclaringType;
+
+			public TypeDebugStringKey(Type type, bool includeNamespace, bool includeDeclaringType)
+			{
+				Type = type;
+				IncludeNamespace = includeNamespace;
+				IncludeDeclaringType = includeDeclaringType;
+			}
+
+			public static bool operator ==(TypeDebugStringKey left, TypeDebugStringKey right) => left.Equals(right);
+
+			public static bool operator !=(TypeDebugStringKey left, TypeDebugStringKey right) => !left.Equals(right);
+
+			public override bool Equals(object obj) => (obj is TypeDebugStringKey other) && Equals(other);
+
+			public bool Equals(TypeDebugStringKey other)
+			{
+				return Type == other.Type && IncludeNamespace == other.IncludeNamespace && IncludeDeclaringType == other.IncludeDeclaringType;
+			}
+
+			public override int GetHashCode()
+			{
+				var hashCode = -1459016077;
+				hashCode = hashCode * -1521134295 + EqualityComparer<Type>.Default.GetHashCode(Type);
+				hashCode = hashCode * -1521134295 + IncludeNamespace.GetHashCode();
+				hashCode = hashCode * -1521134295 + IncludeDeclaringType.GetHashCode();
+				return hashCode;
+			}
+		}
+#endif
+
+		static readonly Dictionary<TypeDebugStringKey, string> TypeToDebugStringCache = InitializeTypeToDebugStringCache();
+
+		static Dictionary<TypeDebugStringKey, string> InitializeTypeToDebugStringCache()
+		{
+			var primitiveTypeToShortName = new Dictionary<Type, string>()
+			{
+				{ typeof(void), "void" },
+				{ typeof(object), "object" },
+				{ typeof(string), "string" },
+				{ typeof(bool), "bool" },
+				{ typeof(byte), "byte" },
+				{ typeof(sbyte), "sbyte" },
+				{ typeof(short), "short" },
+				{ typeof(ushort), "ushort" },
+				{ typeof(int), "int" },
+				{ typeof(uint), "uint" },
+				{ typeof(long), "long" },
+				{ typeof(ulong), "ulong" },
+				{ typeof(char), "char" },
+				{ typeof(float), "float" },
+				{ typeof(double), "double" },
+				{ typeof(decimal), "decimal" },
+			};
+			var typeToDebugStringCache = new Dictionary<TypeDebugStringKey, string>();
+			foreach (var pair in primitiveTypeToShortName)
+			{
+				var type = pair.Key;
+				var name = pair.Value;
+				typeToDebugStringCache.Add(new TypeDebugStringKey(type, false, false), name);
+				typeToDebugStringCache.Add(new TypeDebugStringKey(type, false, true), name);
+				typeToDebugStringCache.Add(new TypeDebugStringKey(type, true, false), name);
+				typeToDebugStringCache.Add(new TypeDebugStringKey(type, true, true), name);
+			}
+			return typeToDebugStringCache;
+		}
+
+		static readonly CSharpCodeProvider CSCProvider = new CSharpCodeProvider();
+
+		// TODO: Combine ToDebugString(Type) overloads when default arguments are supported.
 		public static string ToDebugString(this Type type)
 		{
 			return ToDebugString(type, includeNamespace: true, includeDeclaringType: true);
@@ -344,17 +470,18 @@ namespace LbmLib.Language
 			if (type.IsByRef)
 			{
 				// Assume this is a ParameterInfo.ParameterType, and that ParameterInfo.ToDebugString() already handles the ref/in/out serialization.
-				return type.GetElementType().ToDebugString();
+				return type.GetElementType().ToDebugString(includeNamespace, includeDeclaringType);
 			}
 			if (type.IsPointer)
 			{
-				return type.GetElementType().ToDebugString() + "*";
+				return type.GetElementType().ToDebugString(includeNamespace, includeDeclaringType) + "*";
 			}
 			if (type.IsGenericParameter)
 			{
-				return type.Name;
+				return CSCProvider.CreateEscapedIdentifier(type.Name);
 			}
-			if (!TypeToDebugStringCache.TryGetValue(type, out string str))
+			var typeDebugStringKey = new TypeDebugStringKey(type, includeNamespace, includeDeclaringType);
+			if (!TypeToDebugStringCache.TryGetValue(typeDebugStringKey, out string str))
 			{
 				if (type.IsArray)
 				{
@@ -363,59 +490,113 @@ namespace LbmLib.Language
 						elementType = elementType.GetElementType();
 					while (elementType.IsArray);
 					var bracketStr = type.Name.Substring(type.Name.IndexOf('[')).SplitKeepStringDelimiter("][", keepDelimiterIndex: 1).Reverse().Join("");
-					str = elementType.ToDebugString() + bracketStr;
+					str = elementType.ToDebugString(includeNamespace, includeDeclaringType) + bracketStr;
+				}
+				else if (typeof(Delegate).IsAssignableFrom(type) && type.Namespace != "System")
+				{
+					// System.* delegate types are excluded from long delegate type name since they're "known".
+					// For example, we won't be returning "void Action<T1, T2>(T1 arg1, T2 arg2)" (instead, it'll be just "Action<T1, T2>").
+					str = type.IsGenericType ?
+						ToDebugStringGenericTypeInternal(type, includeNamespace, includeDeclaringType) :
+						ToDebugStringTypeInternal(type, includeNamespace, includeDeclaringType);
+					var method = type.GetMethod("Invoke");
+					str = "delegate " + method.ReturnType.ToDebugString(includeNamespace, includeDeclaringType) + " " + str +
+						"(" + method.GetParameters().Select(parameter => parameter.ToDebugString(includeNamespace, includeDeclaringType)).Join() + ")";
 				}
 				else if (type.IsGenericType)
 				{
 					if (type.GetGenericTypeDefinition() == typeof(Nullable<>))
 					{
-						str = type.GetGenericArguments()[0].ToDebugString() + "?";
+						str = type.GetGenericArguments()[0].ToDebugString(includeNamespace, includeDeclaringType) + "?";
 					}
 					else
 					{
-						str = ToDebugStringTypeInternal(type, includeNamespace, includeDeclaringType);
-						var backTickIndex = str.IndexOf('`');
-						str = (backTickIndex == -1 ? str : str.Substring(0, backTickIndex)) +
-							"<" + type.GetGenericArguments().Select(genericTypeArg => genericTypeArg.ToDebugString()).Join() + ">";
+						str = ToDebugStringGenericTypeInternal(type, includeNamespace, includeDeclaringType);
 					}
 				}
-				// TODO: Somehow support delegate types better?
 				else
 				{
 					str = ToDebugStringTypeInternal(type, includeNamespace, includeDeclaringType);
 				}
-				TypeToDebugStringCache.Add(type, str);
+				TypeToDebugStringCache.Add(typeDebugStringKey, str);
 			}
 			return str;
 		}
 
 		static string ToDebugStringTypeInternal(Type type, bool includeNamespace, bool includeDeclaringType)
 		{
-			return (!includeDeclaringType || type.DeclaringType is null ? "" : type.DeclaringType.ToDebugString() + "/") +
+			return (!includeDeclaringType || type.DeclaringType is null ? "" : type.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "/") +
 				(!includeNamespace || type.Namespace == "System" ? "" : type.Namespace + ".") +
-				(type.Name.StartsWith("<") ? "'" + type.Name + "'" : type.Name);
+				(type.Name.StartsWith("<") ? "'" + type.Name + "'" : CSCProvider.CreateEscapedIdentifier(type.Name));
 		}
 
+		static string ToDebugStringGenericTypeInternal(Type type, bool includeNamespace, bool includeDeclaringType)
+		{
+			var str = ToDebugStringTypeInternal(type, includeNamespace, includeDeclaringType);
+			var backTickIndex = str.IndexOf('`');
+			if (backTickIndex != -1)
+				str = str.Substring(0, backTickIndex);
+			return str + "<" + type.GetGenericArguments().Select(genericTypeArg => genericTypeArg.ToDebugString(includeNamespace, includeDeclaringType)).Join() + ">";
+		}
+
+		// TODO: Combine ToDebugString(FieldInfo) overloads when default arguments are supported.
 		public static string ToDebugString(this FieldInfo field)
 		{
-			return field is null ? "null" : field.FieldType.ToDebugString() + " " + field.DeclaringType.ToDebugString() + "::" + field.Name;
+			return field.ToDebugString(true, true);
 		}
 
+		public static string ToDebugString(this FieldInfo field, bool includeNamespace, bool includeDeclaringType)
+		{
+			return field is null ? "null" : field.FieldType.ToDebugString(includeNamespace, includeDeclaringType) + " " +
+				(includeDeclaringType ? field.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "::" : "") +
+				CSCProvider.CreateEscapedIdentifier(field.Name);
+		}
+
+		// TODO: Combine ToDebugString(MethodBase) overloads when default arguments are supported.
 		public static string ToDebugString(this MethodBase method)
 		{
-			return method is null ? "null" :
-				(method.IsStatic ? "" : "instance ") +
-				(method is MethodInfo methodInfo ? methodInfo.ReturnType.ToDebugString() : "void") + " " +
-				(method.DeclaringType is null ? "" : method.DeclaringType.ToDebugString() + "::") + method.Name +
-				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString()).Join() + ")";
+			return method.ToDebugString(true, true);
 		}
 
+		public static string ToDebugString(this MethodBase method, bool includeNamespace, bool includeDeclaringType)
+		{
+			return method is null ? "null" :
+				(method.IsStatic ? "static " : "") +
+				(method is MethodInfo methodInfo ? methodInfo.ReturnType.ToDebugString(includeNamespace, includeDeclaringType) : "void") + " " +
+				(includeDeclaringType && !(method.DeclaringType is null) ? method.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "::" : "") +
+				CSCProvider.CreateEscapedIdentifier(method.Name) +
+				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString(includeNamespace, includeDeclaringType)).Join() + ")";
+		}
+
+		// TODO: Combine ToDebugString(ParameterInfo) overloads when default arguments are supported.
 		public static string ToDebugString(this ParameterInfo parameter)
+		{
+			return parameter.ToDebugString(true, true);
+		}
+
+		public static string ToDebugString(this ParameterInfo parameter, bool includeNamespace, bool includeDeclaringType)
 		{
 			return parameter is null ? "null" :
 				(parameter.IsDefined(typeof(ParamArrayAttribute), false) ? "params " :
 					(parameter.ParameterType.IsByRef ? (parameter.IsIn ? "in " : parameter.IsOut ? "out " : "ref ") : "")) +
-				parameter.ParameterType.ToDebugString() + " " + parameter.Name;
+				parameter.ParameterType.ToDebugString(includeNamespace, includeDeclaringType) + " " + CSCProvider.CreateEscapedIdentifier(parameter.Name);
+		}
+
+		public static string ToDebugString(this Delegate @delegate)
+		{
+			return @delegate is null ? "null" :
+				@delegate.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " @" + RuntimeHelpers.GetHashCode(@delegate);
+		}
+
+		public static string ToDebugString(this WeakReference weakReference)
+		{
+			return weakReference is null ? "null" :
+				"WeakReference{" + weakReference.Target.ToDebugString() + "}";
+		}
+
+		public static string ToDebugString(this System.Runtime.InteropServices.GCHandle gcHandle)
+		{
+			return "GCHandle{" + (!gcHandle.IsAllocated ? "null" : gcHandle.Target.ToDebugString()) + "}";
 		}
 	}
 }

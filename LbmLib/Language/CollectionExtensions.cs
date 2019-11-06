@@ -148,7 +148,7 @@ namespace LbmLib.Language
 			{
 				if (first)
 					first = false;
-				else
+				else if (!(delimiter is null))
 					sb.Append(delimiter);
 				sb.Append(item?.ToString() ?? "null");
 			}

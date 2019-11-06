@@ -14,14 +14,17 @@ namespace LbmLib.Language.Tests
 			Logging.DefaultLogger = Logging.ConsoleLogger;
 		}
 
-		public object TestMethodSignature<K, V>(int[,,][][,] a, in string b, out List<KeyValuePair<K, V>> c, ref double? d, params Dictionary<K, V>[] e)
+		public KeyValuePair<K, V> TestMethodSignature<K, V>(int[,,][][,] a, in string b, out List<KeyValuePair<K, V>> c, ref double? d, params Dictionary<K, V>[] e)
 		{
 			c = null;
-			return null;
+			return default;
 		}
 
+		delegate KeyValuePair<K, V> TestMethodSignatureDelegate<K, V>(int[,,][][,] a, in string b, out List<KeyValuePair<K, V>> c, ref double? d, params Dictionary<K, V>[] e);
+
+		// TODO: Split into multiple tests.
 		[Test]
-		public void ToDebugStringTest()
+		public void ToDebugStringTests()
 		{
 			Assert.AreEqual("true", true.ToDebugString());
 			Assert.AreEqual("false", false.ToDebugString());
@@ -30,11 +33,16 @@ namespace LbmLib.Language.Tests
 			Assert.AreEqual("1.5", 1.5.ToDebugString());
 			Assert.AreEqual("void", typeof(void).ToDebugString());
 			Assert.AreEqual("List<int> { 1, 2, 3, 4 }", new List<int>() { 1, 2, 3, 4 }.ToDebugString());
-			Assert.AreEqual("System.Collections.Generic.Dictionary<string, Func<int?[,,][], object>>", typeof(Dictionary<string, Func<int?[,,][], object>>).ToDebugString());
-			Assert.AreEqual("instance object LbmLib.Language.Tests.DebugExtensionsTests::TestMethodSignature(int[,,][][,] a, in string b, " +
-				"out System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<K, V>> c, ref double? d, " +
+			Assert.AreEqual("System.Collections.Generic.Dictionary<string, Func<int?[,,][], object>>",
+				typeof(Dictionary<string, Func<int?[,,][], object>>).ToDebugString());
+			Assert.AreEqual("System.Collections.Generic.KeyValuePair<K, V> LbmLib.Language.Tests.DebugExtensionsTests::TestMethodSignature(" +
+				"int[,,][][,] a, in string b, out System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<K, V>> c, ref double? d, " +
 				"params System.Collections.Generic.Dictionary<K, V>[] e)",
 				GetType().GetMethod(nameof(TestMethodSignature)).ToDebugString());
+			Assert.AreEqual("Func<int, long, string>", typeof(Func<int, long, string>).ToDebugString());
+			Assert.AreEqual("delegate KeyValuePair<float, long> TestMethodSignatureDelegate<float, long>(int[,,][][,] a, in string b, " +
+				"out List<KeyValuePair<float, long>> c, ref double? d, params Dictionary<float, long>[] e)",
+				typeof(TestMethodSignatureDelegate<float, long>).ToDebugString(includeNamespace: false, includeDeclaringType: false));
 		}
 
 		[Test]
