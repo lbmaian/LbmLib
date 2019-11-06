@@ -33,7 +33,7 @@ namespace LbmLib.Language
 				throw new ArgumentOutOfRangeException($"count ({count}) cannot be < 0");
 			var listCount = list.Count;
 			if (index > listCount - count)
-				throw new ArgumentOutOfRangeException($"startIndex ({index}) + count ({count}) cannot be > list.Count ({listCount})");
+				throw new ArgumentOutOfRangeException($"index ({index}) + count ({count}) cannot be > list.Count ({listCount})");
 			var range = new List<T>(count);
 			var endIndexExcl = index + count;
 			while (index < endIndexExcl)

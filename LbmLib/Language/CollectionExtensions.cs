@@ -8,14 +8,59 @@ namespace LbmLib.Language
 {
 	public static class CollectionExtensions
 	{
+#if !NET35
+		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+#endif
 		public static List<T> AsList<T>(this IEnumerable<T> enumerable)
 		{
 			return enumerable as List<T> ?? new List<T>(enumerable);
 		}
 
+#if !NET35
+		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+#endif
 		public static List<T> AsList<T>(this IEnumerable enumerable)
 		{
 			return enumerable as List<T> ?? new List<T>(enumerable.Cast<T>());
+		}
+
+		// Essentially IList.GetRange(list, 0, count) without needing to check whether index is out of bounds.
+		public static List<T> GetRangeFromStart<T>(this IList<T> list, int count)
+		{
+			if (list is List<T> actualList)
+				return actualList.GetRange(0, count);
+			if (count < 0)
+				throw new ArgumentOutOfRangeException($"count ({count}) cannot be < 0");
+			var listCount = list.Count;
+			if (count > listCount)
+				throw new ArgumentOutOfRangeException($"count ({count}) cannot be > list.Count ({listCount})");
+			var range = new List<T>(count);
+			for (var index = 0; index < count; index++)
+			{
+				range.Add(list[index]);
+			}
+			return range;
+		}
+
+		// Essentially IList.GetRange(list, index, list.Count - index) without needing to check whether count is out of bounds.
+		public static List<T> GetRangeToEnd<T>(this IList<T> list, int index)
+		{
+			if (list is List<T> actualList)
+				return actualList.GetRange(index, list.Count - index);
+			if (index < 0)
+				throw new ArgumentOutOfRangeException($"index ({index}) cannot be < 0");
+			var listCount = list.Count;
+			if (index > listCount)
+				throw new ArgumentOutOfRangeException($"index ({index}) cannot be > list.Count ({listCount})");
+			var count = listCount - index;
+			var range = new List<T>(count);
+			var endIndexExcl = index + count;
+			while (index < endIndexExcl)
+			{
+				range.Add(list[index]);
+				index++;
+			}
+			return range;
 		}
 
 		// XXX: Needs a better name.
