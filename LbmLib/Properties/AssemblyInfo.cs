@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 // Setting ComVisible to false makes the types in this assembly not visible
 // to COM components.  If you need to access a type in this assembly from
@@ -7,3 +8,5 @@
 
 // The following GUID is for the ID of the typelib if this project is exposed to COM
 [assembly: Guid("5eb39975-ff2b-4306-a737-7fd09401ffc0")]
+
+[assembly: InternalsVisibleTo("LbmLibTests")]
