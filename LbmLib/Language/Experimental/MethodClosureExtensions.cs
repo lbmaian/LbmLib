@@ -5,10 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices; // for ConditionalWeakTable (.NET 4+) and MethodImpl
 #if NET35
 using System.Runtime.InteropServices; // for GCHandle
-#else
-using System.Runtime.CompilerServices; // for ConditionalWeakTable
 #endif
 
 namespace LbmLib.Language.Experimental
@@ -382,14 +381,10 @@ namespace LbmLib.Language.Experimental
 
 		// More convenient generic overloads of CreateDelegate.
 
-#if !NET35
-		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-#endif
+		[MethodImpl(256)] // AggressiveInlining
 		public static T CreateDelegate<T>(this MethodInfo method) where T : Delegate => (T)method.CreateDelegate(typeof(T));
 
-#if !NET35
-		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-#endif
+		[MethodImpl(256)] // AggressiveInlining
 		public static T CreateDelegate<T>(this MethodInfo method, object target) where T : Delegate => (T)method.CreateDelegate(typeof(T), target);
 
 		public static ClosureMethod Bind(this MethodInfo method, object target)

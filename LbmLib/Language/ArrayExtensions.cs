@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 
 namespace LbmLib.Language
 {
@@ -15,9 +16,7 @@ namespace LbmLib.Language
 			return combinedArray;
 		}
 
-#if !NET35
-		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-#endif
+		[MethodImpl(256)] // AggressiveInlining
 		public static T[] Prepend<T>(this T[] array, params T[] toPrepend)
 		{
 			return toPrepend.Append(array);

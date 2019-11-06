@@ -2,23 +2,20 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace LbmLib.Language
 {
 	public static class CollectionExtensions
 	{
-#if !NET35
-		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-#endif
+		[MethodImpl(256)] // AggressiveInlining
 		public static List<T> AsList<T>(this IEnumerable<T> enumerable)
 		{
 			return enumerable as List<T> ?? new List<T>(enumerable);
 		}
 
-#if !NET35
-		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-#endif
+		[MethodImpl(256)] // AggressiveInlining
 		public static List<T> AsList<T>(this IEnumerable enumerable)
 		{
 			return enumerable as List<T> ?? new List<T>(enumerable.Cast<T>());
