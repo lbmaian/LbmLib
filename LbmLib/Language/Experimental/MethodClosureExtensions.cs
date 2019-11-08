@@ -5,10 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.CompilerServices; // for ConditionalWeakTable (.NET 4+) and MethodImpl
-#if NET35
-using System.Runtime.InteropServices; // for GCHandle
-#endif
+using System.Runtime.CompilerServices;
 
 namespace LbmLib.Language.Experimental
 {
@@ -59,7 +56,7 @@ namespace LbmLib.Language.Experimental
 			internal readonly List<object[]> Closures = new List<object[]>();
 
 #if NET35
-			readonly List<GCHandle> WeakReferences = new List<GCHandle>();
+			readonly List<WeakReference> WeakReferences = new List<WeakReference>();
 #else
 			readonly ConditionalWeakTable<Delegate, DeregisterUponFinalize> WeakReferences =
 				new ConditionalWeakTable<Delegate, DeregisterUponFinalize>();
@@ -95,8 +92,7 @@ namespace LbmLib.Language.Experimental
 					{
 						Closures[closureKey] = closure;
 #if NET35
-						var gcHandle = WeakReferences[closureKey];
-						gcHandle.Target = closureDelegate;
+						WeakReferences[closureKey] = new WeakReference(closureDelegate);
 #endif
 					}
 					else
@@ -105,20 +101,20 @@ namespace LbmLib.Language.Experimental
 						{
 							Closures.Add(null);
 #if NET35
-							WeakReferences.Add(GCHandle.Alloc(null, GCHandleType.Weak));
+							WeakReferences.Add(null);
 #endif
 							closureCount++;
 						}
 						Closures.Add(closure);
 #if NET35
-						WeakReferences.Add(GCHandle.Alloc(closureDelegate, GCHandleType.Weak));
+						WeakReferences.Add(new WeakReference(closureDelegate));
 #endif
 					}
 #if !NET35
 					WeakReferences.Add(closureDelegate, new DeregisterUponFinalize(closureKey));
 #endif
 				}
-				Logging.Log($"DEBUG Register(closureKey={closureKey}, closure={closure.ToDebugString()} closureDelegate={closureDelegate.Method.ToDebugString()})");
+				//Logging.Log($"DEBUG Register(closureKey={closureKey}, closure={closure.ToDebugString()} closureDelegate={closureDelegate.ToDebugString()})");
 #if NET35
 				GCMonitor.EnsureStarted();
 #endif
@@ -132,10 +128,10 @@ namespace LbmLib.Language.Experimental
 					if (minimumFreeClosureKey > closureKey)
 						minimumFreeClosureKey = closureKey;
 #if NET35
-					WeakReferences[closureKey].Free();
+					WeakReferences[closureKey] = null;
 #endif
 				}
-				Logging.Log($"DEBUG Deregister(closureKey={closureKey}), minimumFreeClosureKey={minimumFreeClosureKey}");
+				//Logging.Log($"DEBUG Deregister(closureKey={closureKey}), minimumFreeClosureKey={minimumFreeClosureKey}");
 			}
 
 #if NET35
@@ -161,7 +157,7 @@ namespace LbmLib.Language.Experimental
 				{
 					try
 					{
-						Logging.Log("DEBUG ~GCMonitor()");
+						//Logging.Log("DEBUG ~GCMonitor()");
 						lock (DelegateRegistry)
 						{
 							var closures = DelegateRegistry.Closures;
@@ -169,7 +165,7 @@ namespace LbmLib.Language.Experimental
 							var closuresCount = closures.Count;
 							for (var closureKey = 0; closureKey < closuresCount; closureKey++)
 							{
-								if (!(closures[closureKey] is null) && weakReferences[closureKey].Target is null)
+								if (!(closures[closureKey] is null) && !weakReferences[closureKey].IsAlive)
 								{
 									DelegateRegistry.Deregister(closureKey);
 								}
@@ -181,16 +177,6 @@ namespace LbmLib.Language.Experimental
 						if (!AppDomain.CurrentDomain.IsFinalizingForUnload() && !Environment.HasShutdownStarted)
 							new GCMonitor();
 					}
-				}
-			}
-
-			// In case the ClosureMethod class is somehow unloaded, clean up all GCHandle's.
-			~ClosureDelegateRegistry()
-			{
-				foreach (var weakReference in WeakReferences)
-				{
-					if (weakReference.IsAllocated)
-						weakReference.Free();
 				}
 			}
 #else
@@ -395,7 +381,7 @@ namespace LbmLib.Language.Experimental
 				throw new ArgumentException($"method {method.ToDebugString()} cannot be a static method");
 			if (!method.DeclaringType.IsAssignableFrom(target.GetType()))
 				throw new ArgumentException($"target's type ({target.GetType().ToDebugString()}) " +
-					$"must be assignable to method.DeclaringType ({method.DeclaringType.ToDebugString()})");
+					$"is not compatible with method.DeclaringType ({method.DeclaringType.ToDebugString()})");
 			var genericMethodDefinition = method.IsGenericMethod ? method.GetGenericMethodDefinition() : null;
 			if (method is ClosureMethod closureMethod)
 				return new ClosureMethod(closureMethod.OriginalMethod, closureMethod.Attributes | MethodAttributes.Static, closureMethod.GetParameters(),
@@ -617,11 +603,8 @@ namespace LbmLib.Language.Experimental
 				ilGenerator.Emit(OpCodes.Callvirt, method);
 			}
 
-			// Emit return, boxing the return value if needed.
-			if (returnType != typeof(void) && returnType.IsValueType)
-			{
-				ilGenerator.Emit(OpCodes.Box, returnType);
-			}
+			// Emit return. Note that if returning a value type, boxing the return value isn't needed
+			// since the method return type would be a value type in this case (rather than object).
 			ilGenerator.Emit(OpCodes.Ret);
 
 			var closureDelegate = methodBuilder.CreateDelegate(delegateType);

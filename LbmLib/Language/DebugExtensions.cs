@@ -5,6 +5,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.CSharp;
 
 #if !NET35
@@ -525,7 +526,7 @@ namespace LbmLib.Language
 
 		static string ToDebugStringTypeInternal(Type type, bool includeNamespace, bool includeDeclaringType)
 		{
-			return (!includeDeclaringType || type.DeclaringType is null ? "" : type.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "/") +
+			return (!includeDeclaringType || type.DeclaringType is null ? "" : type.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "::") +
 				(!includeNamespace || type.Namespace == "System" ? "" : type.Namespace + ".") +
 				(type.Name.StartsWith("<") ? "'" + type.Name + "'" : CSCProvider.CreateEscapedIdentifier(type.Name));
 		}
@@ -584,6 +585,7 @@ namespace LbmLib.Language
 
 		public static string ToDebugString(this Delegate @delegate)
 		{
+			// Note: Delegate.GetHashCode() delegates to its type's GetHashCode(), so have to use RuntimeHelpers.GetHashCode() to get something meaningful.
 			return @delegate is null ? "null" :
 				@delegate.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " @" + RuntimeHelpers.GetHashCode(@delegate);
 		}
@@ -591,12 +593,12 @@ namespace LbmLib.Language
 		public static string ToDebugString(this WeakReference weakReference)
 		{
 			return weakReference is null ? "null" :
-				"WeakReference{" + weakReference.Target.ToDebugString() + "}";
+				"WeakReference{" + weakReference.Target.ToDebugString() + "} @" + weakReference.GetHashCode();
 		}
 
-		public static string ToDebugString(this System.Runtime.InteropServices.GCHandle gcHandle)
+		public static string ToDebugString(this GCHandle gcHandle)
 		{
-			return "GCHandle{" + (!gcHandle.IsAllocated ? "null" : gcHandle.Target.ToDebugString()) + "}";
+			return "GCHandle{" + (!gcHandle.IsAllocated ? "null" : gcHandle.Target.ToDebugString()) + "} @" + gcHandle.GetHashCode();
 		}
 	}
 }

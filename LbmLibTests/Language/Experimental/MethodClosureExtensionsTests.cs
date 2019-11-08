@@ -67,9 +67,8 @@ namespace LbmLib.Language.Experimental.Tests
 			return "asdf";
 		}
 
-
 		[Test]
-		public void PartialApplyTest_SimpleStaticVoidMethod()
+		public void PartialApply_SimpleStaticVoidMethod()
 		{
 			var actualLogs = new List<string>();
 			using (Logging.With(x => actualLogs.Add(x)))
@@ -81,7 +80,8 @@ namespace LbmLib.Language.Experimental.Tests
 				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
 				var nonFixedArguments = new object[] { 40L, 20 };
 				partialAppliedMethod.Invoke(null, nonFixedArguments);
-				
+				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Action<long, int>>();
+				partialAppliedDelegate(30L, 10);
 			}
 			var expectedLogs = new[]
 			{
@@ -89,6 +89,41 @@ namespace LbmLib.Language.Experimental.Tests
 				"y: 20",
 				"l: 40",
 				"x: 20",
+				"s: hello world",
+				"y: 20",
+				"l: 30",
+				"x: 10",
+			};
+			CollectionAssert.AreEqual(expectedLogs, actualLogs);
+		}
+
+		[Test]
+		public void PartialApply_SimpleStaticNonVoidMethod()
+		{
+			var actualLogs = new List<string>();
+			using (Logging.With(x => actualLogs.Add(x)))
+			{
+				//SimpleStaticNonVoidMethod("mystring", 2, 4L, 100);
+				var method = GetType().GetMethod(nameof(SimpleStaticNonVoidMethod));
+				var fixedArguments = new object[] { "hello world", 1, 2L, 3 };
+				var partialAppliedMethod = method.PartialApply(fixedArguments);
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				var returnValue = partialAppliedMethod.Invoke(null, new object[0]);
+				Assert.AreEqual("asdf", returnValue);
+				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<string>>();
+				returnValue = partialAppliedDelegate();
+				Assert.AreEqual("asdf", returnValue);
+			}
+			var expectedLogs = new[]
+			{
+				"s: hello world",
+				"y: 1",
+				"l: 2",
+				"x: 3",
+				"s: hello world",
+				"y: 1",
+				"l: 2",
+				"x: 3",
 			};
 			CollectionAssert.AreEqual(expectedLogs, actualLogs);
 		}
@@ -143,10 +178,10 @@ namespace LbmLib.Language.Experimental.Tests
 			return sl.Select(z => new string[] { z + "a", z + "b", z + "c" }).ToList();
 		}
 
-		delegate void FancyStaticVoidMethod_PartialApply_Delegate1(ref int x);
+		delegate void FancyStaticVoidMethod_PartialApply_Delegate(ref int x);
 
 		[Test]
-		public void PartialApplyTest_FancyStaticVoidMethod1()
+		public void PartialApply_FancyStaticVoidMethod()
 		{
 			var actualLogs = new List<string>();
 			using (Logging.With(x => actualLogs.Add(x)))
@@ -167,7 +202,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var nonFixedArguments = new object[] { 20 };
 				partialAppliedMethod.Invoke(null, nonFixedArguments);
 				Assert.AreEqual(20 * 20, nonFixedArguments[0]);
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<FancyStaticVoidMethod_PartialApply_Delegate1>();
+				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<FancyStaticVoidMethod_PartialApply_Delegate>();
 				var x1 = 30;
 				partialAppliedDelegate(ref x1);
 				Assert.AreEqual(30 * 30, x1);
@@ -191,36 +226,40 @@ namespace LbmLib.Language.Experimental.Tests
 				"l: 40",
 				"x: 30",
 			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")).ToArray());
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
 		}
 
-		delegate void FancyStaticVoidMethod_PartialApply_Delegate2(TestClass @null, List<string> sl, long l, ref int x);
+		delegate List<string[]> FancyStaticNonVoidMethod_PartialApply_Delegate(TestClass @null, List<string> sl, long l, ref int x);
 
 		[Test]
-		public void PartialApplyTest_FancyStaticVoidMethod2()
+		public void PartialApply_FancyStaticNonVoidMethod()
 		{
 			var actualLogs = new List<string>();
 			using (Logging.With(x => actualLogs.Add(x)))
 			{
-				var method = GetType().GetMethod(nameof(FancyStaticVoidMethod));
+				var method = GetType().GetMethod(nameof(FancyStaticNonVoidMethod));
 				var fixedArguments = new object[] { "hi world", new TestStruct(10), 20, new TestClass(30) };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
-				Assert.AreEqual("Void FancyStaticVoidMethod_unbound_hiworld_TestStruct10_20_TestClass30" +
+				Assert.AreEqual("List`1 FancyStaticNonVoidMethod_unbound_hiworld_TestStruct10_20_TestClass30" +
 					"(TestClass null, System.Collections.Generic.List`1[System.String] sl, Int64 l, Int32& x)",
 					partialAppliedMethod.ToString());
-				Assert.AreEqual("static void LbmLib.Language.Experimental.Tests.MethodClosureExtensionsTests::FancyStaticVoidMethod" +
+				Assert.AreEqual("static System.Collections.Generic.List<string[]> " +
+					"LbmLib.Language.Experimental.Tests.MethodClosureExtensionsTests::FancyStaticNonVoidMethod" +
 					"(#hi world#, #TestStruct{10}#, #20#, #TestClass{30}#, " +
-					"LbmLib.Language.Experimental.Tests.MethodClosureExtensionsTests/LbmLib.Language.Experimental.Tests.TestClass @null, " +
+					"LbmLib.Language.Experimental.Tests.MethodClosureExtensionsTests::LbmLib.Language.Experimental.Tests.TestClass @null, " +
 					"System.Collections.Generic.List<string> sl, long l, ref int x)",
 					partialAppliedMethod.ToDebugString());
 				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
 				CollectionAssert.AreEqual(method.GetParameters().CopyToEnd(fixedArguments.Length), partialAppliedMethod.GetParameters());
 				var nonFixedArguments = new object[] { null, new List<string>() { "uiop" }, 40L, 20 };
-				partialAppliedMethod.Invoke(null, nonFixedArguments);
+				var returnValue = (List<string[]>)partialAppliedMethod.Invoke(null, nonFixedArguments);
+				var expectedReturnValue = new List<string[]>() { new string[] { "uiopa", "uiopb", "uiopc" } };
+				Assert.AreEqual(expectedReturnValue, returnValue);
 				Assert.AreEqual(20 * 20, nonFixedArguments[3]);
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<FancyStaticVoidMethod_PartialApply_Delegate2>();
+				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<FancyStaticNonVoidMethod_PartialApply_Delegate>();
 				var x = 30;
-				partialAppliedDelegate(null, new List<string>() { "uiop" }, 40L, ref x);
+				returnValue = partialAppliedDelegate(null, new List<string>() { "uiop" }, 40L, ref x);
+				Assert.AreEqual(expectedReturnValue, returnValue);
 				Assert.AreEqual(30 * 30, x);
 			}
 			var expectedLogs = new[]
@@ -242,10 +281,8 @@ namespace LbmLib.Language.Experimental.Tests
 				"l: 40",
 				"x: 30",
 			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")).ToArray());
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
 		}
-
-		// TODO: Test PartialApply on method with return value.
 
 		// TODO: Test PartialApply on instance method.
 
@@ -259,8 +296,13 @@ namespace LbmLib.Language.Experimental.Tests
 
 		// TODO: Test ClosureMethod.MakeGenericMethod somehow.
 
+		static ICollection<string> FilterLogs(IEnumerable<string> logs)
+		{
+			return logs.Where(x => !x.StartsWith("DEBUG") && !x.StartsWith("Saved dynamically created partial applied method to")).ToList();
+		}
+
 		[Test]
-		public void CreateDelegateTest_NonClosureStaticMethod()
+		public void CreateDelegate_NonClosureStaticMethod()
 		{
 			var actualLogs = new List<string>();
 			using (Logging.With(x => actualLogs.Add(x)))
@@ -280,14 +322,14 @@ namespace LbmLib.Language.Experimental.Tests
 		}
 
 		[Test]
-		public void CreateDelegateTest_NonClosureStaticMethod_Error()
+		public void CreateDelegate_NonClosureStaticMethod_Error()
 		{
 			var method = GetType().GetMethod(nameof(SimpleStaticVoidMethod));
 			Assert.Throws(typeof(ArgumentException), () => method.CreateDelegate<Action<string, int, long, int>>(new object()));
 		}
 
 		[Test]
-		public void CreateDelegateTest_NonClosureInstanceMethod()
+		public void CreateDelegate_NonClosureInstanceMethod()
 		{
 			var actualLogs = new List<string>();
 			using (Logging.With(x => actualLogs.Add(x)))
@@ -306,52 +348,64 @@ namespace LbmLib.Language.Experimental.Tests
 		}
 
 		[Test]
-		public void CreateDelegateTest_NonClosureInstanceMethod_Error()
+		public void CreateDelegate_NonClosureInstanceMethod_Error()
 		{
 			var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
 			Assert.Throws(typeof(ArgumentException), () => method.CreateDelegate<Action<int, string[]>>());
 		}
 
 		[Test]
-		public void CreateDelegateTest_ClosureMethod_GC()
+		public void ClosureMethod_DelegateRegistry_GC()
 		{
-			GC.Collect();
-			GC.WaitForPendingFinalizers();
+			TryFullGCFinalization();
 			var actualLogs = new List<string>();
 			using (Logging.With(x => actualLogs.Add(x)))
 			{
-				var method = GetType().GetMethod(nameof(FancyStaticVoidMethod));
-				var partialAppliedDelegate = default(FancyStaticVoidMethod_PartialApply_Delegate2);
-				for (var i = 0; i < 20; i++)
-				{
-					var partialAppliedMethod = method.PartialApply("hello world", new TestStruct(10), 20, new TestClass(30));
-					partialAppliedDelegate = partialAppliedMethod.CreateDelegate<FancyStaticVoidMethod_PartialApply_Delegate2>();
-					if (i % 5 == 0)
-					{
-						// TODO: Assert ClosureMethod.DelegateRegistry data.
-						Console.WriteLine("before GC: " + ClosureMethod.DelegateRegistry);
-						GC.Collect();
-						GC.WaitForPendingFinalizers();
-						// TODO: Assert ClosureMethod.DelegateRegistry data.
-						Console.WriteLine("after GC: " + ClosureMethod.DelegateRegistry);
-					}
-				}
-				GC.Collect();
-				GC.WaitForPendingFinalizers();
-				// TODO: Assert ClosureMethod.DelegateRegistry data.
-				Console.WriteLine("before GC: " + ClosureMethod.DelegateRegistry);
-				// Test that the latest partially applied method delegate still works.
-				var x = 20;
-				partialAppliedDelegate(null, new List<string>() { "qwerty" }, 40L, ref x);
-				Assert.AreEqual(20 * 20, x);
-				partialAppliedDelegate = null;
-				GC.Collect();
-				GC.WaitForPendingFinalizers();
-				// TODO: Assert ClosureMethod.DelegateRegistry data.
-				Console.WriteLine("after GC: " + ClosureMethod.DelegateRegistry);
+				// Note: Even null-ing out a variable that holds the only reference to an object doesn't actually allow the object to be
+				// finalizable until after the method ends, so putting all the logic that stores delegates into variables into another method.
+				ClosureMethod_DelegateRegistry_GC_Internal();
+				//Logging.Log("DEBUG before final GC:\n" + ClosureMethod.DelegateRegistry);
+				Assert.AreEqual(1, ClosureMethod.DelegateClosures.Where(closure => !(closure is null)).Count());
+				TryFullGCFinalization();
+				//Logging.Log("DEBUG after final GC:\n" + ClosureMethod.DelegateRegistry);
+				Assert.AreEqual(0, ClosureMethod.DelegateClosures.Where(closure => !(closure is null)).Count());
 			}
-			// TODO: Assert actualLogs.
-			Logging.Log(actualLogs.Join("\n"));
+			//Logging.Log(actualLogs.Join("\n"));
+		}
+
+		void ClosureMethod_DelegateRegistry_GC_Internal()
+		{
+			var method = GetType().GetMethod(nameof(FancyStaticNonVoidMethod));
+			var partialAppliedDelegate = default(FancyStaticNonVoidMethod_PartialApply_Delegate);
+			for (var i = 1; i <= 20; i++)
+			{
+				var partialAppliedMethod = method.PartialApply("hello world", new TestStruct(10), 20, new TestClass(30));
+				partialAppliedDelegate = partialAppliedMethod.CreateDelegate<FancyStaticNonVoidMethod_PartialApply_Delegate>();
+				if (i % 5 == 0)
+				{
+					//Logging.Log($"DEBUG before {i} GC:\n" + ClosureMethod.DelegateRegistry);
+					Assert.AreEqual(i == 5 ? 5 : 6, ClosureMethod.DelegateClosures.Where(closure => !(closure is null)).Count());
+					TryFullGCFinalization();
+					//Logging.Log($"DEBUG after {i} GC:\n" + ClosureMethod.DelegateRegistry);
+					Assert.AreEqual(1, ClosureMethod.DelegateClosures.Where(closure => !(closure is null)).Count());
+				}
+			}
+			// Test that the latest partially applied method delegate still works.
+			var x = 20;
+			partialAppliedDelegate(null, new List<string>() { "qwerty" }, 40L, ref x);
+			Assert.AreEqual(20 * 20, x);
+		}
+
+		static void TryFullGCFinalization()
+		{
+			// This probably isn't fool-proof (what happens if finalizers themselves create objects that need finalization?),
+			// but it suffices for our unit testing purposes.
+			// Garbage collect any finalized objects and identify finalizable objects.
+			GC.Collect();
+			// Finalize found finalizable objects.
+			GC.WaitForPendingFinalizers();
+			// Garbage collect just-finalized objects.
+			GC.Collect();
 		}
 	}
 }
