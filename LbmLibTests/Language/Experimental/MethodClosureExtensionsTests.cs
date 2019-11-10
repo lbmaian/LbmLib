@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 
 namespace LbmLib.Language.Experimental.Tests
@@ -29,6 +30,7 @@ namespace LbmLib.Language.Experimental.Tests
 
 			public void SimpleInstanceVoidMethod(int y, params string[] ss)
 			{
+				Logging.Log(X, "x");
 				Logging.Log(y, "y");
 				Logging.Log(ss.ToDebugString(), "ss");
 			}
@@ -47,9 +49,17 @@ namespace LbmLib.Language.Experimental.Tests
 
 			public string SimpleInstanceNonVoidMethod(int y, params string[] ss)
 			{
+				Logging.Log(X, "x");
 				Logging.Log(y, "y");
 				Logging.Log(ss.ToDebugString(), "ss");
 				return "ghkj";
+			}
+
+			public virtual void SimpleVirtualInstanceVoidMethod(int y, params string[] ss)
+			{
+				Logging.Log(X, "x");
+				Logging.Log(y, "y");
+				Logging.Log(ss.ToDebugString(), "ss");
 			}
 		}
 
@@ -78,8 +88,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var fixedArguments = new object[] { "hello world", 20 };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
 				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
-				var nonFixedArguments = new object[] { 40L, 20 };
-				partialAppliedMethod.Invoke(null, nonFixedArguments);
+				partialAppliedMethod.Invoke(null, new object[] { 40L, 20 });
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Action<long, int>>();
 				partialAppliedDelegate(30L, 10);
 			}
@@ -94,7 +103,7 @@ namespace LbmLib.Language.Experimental.Tests
 				"l: 30",
 				"x: 10",
 			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs);
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
 		}
 
 		[Test]
@@ -105,13 +114,16 @@ namespace LbmLib.Language.Experimental.Tests
 			{
 				//SimpleStaticNonVoidMethod("mystring", 2, 4L, 100);
 				var method = GetType().GetMethod(nameof(SimpleStaticNonVoidMethod));
-				var fixedArguments = new object[] { "hello world", 1, 2L, 3 };
+				var fixedArguments = new object[] { "hello world", 1, 2L };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
 				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
-				var returnValue = partialAppliedMethod.Invoke(null, new object[0]);
+				var returnValue = partialAppliedMethod.Invoke(null, new object[] { 3 });
 				Assert.AreEqual("asdf", returnValue);
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<string>>();
-				returnValue = partialAppliedDelegate();
+				// Static method can be invoked with a non-null target - target is just ignored in this case.
+				returnValue = partialAppliedMethod.Invoke(this, new object[] { 5 });
+				Assert.AreEqual("asdf", returnValue);
+				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<int, string>>();
+				returnValue = partialAppliedDelegate(7);
 				Assert.AreEqual("asdf", returnValue);
 			}
 			var expectedLogs = new[]
@@ -123,9 +135,142 @@ namespace LbmLib.Language.Experimental.Tests
 				"s: hello world",
 				"y: 1",
 				"l: 2",
-				"x: 3",
+				"x: 5",
+				"s: hello world",
+				"y: 1",
+				"l: 2",
+				"x: 7",
 			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs);
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
+		}
+
+		[Test]
+		public void PartialApply_StaticMethod_Error()
+		{
+			var method = GetType().GetMethod(nameof(SimpleStaticNonVoidMethod));
+			var partialAppliedMethod = method.PartialApply("hello world", 1, 2L);
+			// Static method delegate cannot be invoked with a target.
+			Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.CreateDelegate<Func<int, string>>(this));
+			// Invoked with too few parameters.
+			Assert.Throws(typeof(TargetParameterCountException), () => partialAppliedMethod.Invoke(null, new object[0]));
+			// Invoked with too many parameters.
+			Assert.Throws(typeof(TargetParameterCountException), () => partialAppliedMethod.Invoke(null, new object[] { 3, 4 }));
+			// Invoked with invalid parameter type.
+			Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.Invoke(null, new object[] { "string" }));
+			// Invalid delegate type.
+			Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.CreateDelegate<Func<string, int>>());
+		}
+
+		delegate void SimpleInstanceVoidMethod_PartialApply_Delegate(params string[] ss);
+
+		[Test]
+		public void PartialApply_SimpleInstanceVoidMethod()
+		{
+			var actualLogs = new List<string>();
+			using (Logging.With(x => actualLogs.Add(x)))
+			{
+				var v = new TestStruct(15);
+				//v.SimpleInstanceVoidMethod(5, "hello", "world");
+				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
+				var fixedArguments = new object[] { 5 };
+				var partialAppliedMethod = method.PartialApply(fixedArguments);
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				partialAppliedMethod.Invoke(v, new object[] { new string[] { "hello", "world" } });
+				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(v);
+				partialAppliedDelegate("hi", "there");
+			}
+			var expectedLogs = new[]
+			{
+				"x: 15",
+				"y: 5",
+				"ss: string[] { hello, world }",
+				"x: 15",
+				"y: 5",
+				"ss: string[] { hi, there }",
+			};
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
+		}
+
+		[Test]
+		public void PartialApply_SimpleInstanceNonVoidMethod()
+		{
+			var actualLogs = new List<string>();
+			using (Logging.With(x => actualLogs.Add(x)))
+			{
+				var c = new TestClass(15);
+				//c.SimpleInstanceNonVoidMethod(5, "hello", "world");
+				var method = typeof(TestClass).GetMethod(nameof(TestClass.SimpleInstanceNonVoidMethod));
+				var fixedArguments = new object[] { 5 };
+				var partialAppliedMethod = method.PartialApply(fixedArguments);
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				var returnValue = (string)partialAppliedMethod.Invoke(c, new object[] { new string[] { "hello", "world" } });
+				Assert.AreEqual("ghkj", returnValue);
+				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<string[], string>>(c);
+				returnValue = partialAppliedDelegate(new string[] { "hi", "there" });
+				Assert.AreEqual("ghkj", returnValue);
+			}
+			var expectedLogs = new[]
+			{
+				"x: 15",
+				"y: 5",
+				"ss: string[] { hello, world }",
+				"x: 15",
+				"y: 5",
+				"ss: string[] { hi, there }",
+			};
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
+		}
+
+		[Test]
+		public void PartialApply_SimpleVirtualInstanceVoidMethod()
+		{
+			var actualLogs = new List<string>();
+			using (Logging.With(x => actualLogs.Add(x)))
+			{
+				var c = new TestClass(15);
+				//c.SimpleVirtualInstanceVoidMethod(5, "hello", "world");
+				var method = typeof(TestClass).GetMethod(nameof(TestClass.SimpleVirtualInstanceVoidMethod));
+				var fixedArguments = new object[] { 5 };
+				var partialAppliedMethod = method.PartialApply(fixedArguments);
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				partialAppliedMethod.Invoke(c, new object[] { new string[] { "hello", "world" } });
+				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(c);
+				partialAppliedDelegate("hi", "there");
+			}
+			var expectedLogs = new[]
+			{
+				"x: 15",
+				"y: 5",
+				"ss: string[] { hello, world }",
+				"x: 15",
+				"y: 5",
+				"ss: string[] { hi, there }",
+			};
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
+		}
+
+		[Test]
+		public void PartialApply_InstanceMethod_Error()
+		{
+			var v = new TestStruct(15);
+			var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
+			var partialAppliedMethod = method.PartialApply(5);
+			// Instance method cannot be invoked without a target.
+			Assert.Throws(typeof(TargetException), () => partialAppliedMethod.Invoke(null, new object[] { 3 }));
+			// Instance method cannot be invoked with an invalid target.
+			Assert.Throws(typeof(TargetException), () => partialAppliedMethod.Invoke(this, new object[] { 3 }));
+			// Invoked with too few parameters.
+			Assert.Throws(typeof(TargetParameterCountException), () => partialAppliedMethod.Invoke(v, new object[0]));
+			// Invoked with too many parameters.
+			Assert.Throws(typeof(TargetParameterCountException), () => partialAppliedMethod.Invoke(v, new object[] { 3, 4 }));
+			// Invoked with invalid parameter type.
+			Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.Invoke(v, new object[] { "string" }));
+			// Instance method delegate cannot be invoked without a target.
+			Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.CreateDelegate<Action<string, string>>());
+			// Instance method delegate cannot be invoked with an invalid target.
+			Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.CreateDelegate<Action<string, string>>(this));
+			// Invalid delegate type.
+			Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.CreateDelegate<Func<string, int>>(v));
 		}
 
 		public partial struct TestStruct
@@ -284,7 +429,13 @@ namespace LbmLib.Language.Experimental.Tests
 			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
 		}
 
-		// TODO: Test PartialApply on instance method.
+		// TODO: Test PartialApply with 0 fixed arguments.
+
+		// TODO: Test PartialApply with fixed arguments for all parameters.
+
+		// TODO: Test PartialApply on simple/fancy void instance method.
+
+		// TODO: Test PartialApply on simple/fancy non-void instance method.
 
 		// TODO: Test Bind on static method => throws exception.
 
@@ -294,7 +445,9 @@ namespace LbmLib.Language.Experimental.Tests
 
 		// TODO: Test Bind on PartialApply on instance method.
 
-		// TODO: Test ClosureMethod.MakeGenericMethod somehow.
+		// TODO: Test ClosureMethod.MakeGenericMethod on non-GenericMethodDefinition method => throws exception.
+
+		// TODO: Test ClosureMethod.MakeGenericMethod on GenericMethodDefinition method.
 
 		static ICollection<string> FilterLogs(IEnumerable<string> logs)
 		{
@@ -318,7 +471,7 @@ namespace LbmLib.Language.Experimental.Tests
 				"l: 4",
 				"x: 100",
 			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs);
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
 		}
 
 		[Test]
@@ -341,10 +494,11 @@ namespace LbmLib.Language.Experimental.Tests
 			}
 			var expectedLogs = new[]
 			{
+				"x: 1",
 				"y: 3",
 				"ss: string[] { hi, there }",
 			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs);
+			CollectionAssert.AreEqual(expectedLogs, FilterLogs(actualLogs));
 		}
 
 		[Test]
@@ -365,10 +519,10 @@ namespace LbmLib.Language.Experimental.Tests
 				// finalizable until after the method ends, so putting all the logic that stores delegates into variables into another method.
 				ClosureMethod_DelegateRegistry_GC_Internal();
 				//Logging.Log("DEBUG before final GC:\n" + ClosureMethod.DelegateRegistry);
-				Assert.AreEqual(1, ClosureMethod.DelegateClosures.Where(closure => !(closure is null)).Count());
+				Assert.AreEqual(1, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
 				TryFullGCFinalization();
 				//Logging.Log("DEBUG after final GC:\n" + ClosureMethod.DelegateRegistry);
-				Assert.AreEqual(0, ClosureMethod.DelegateClosures.Where(closure => !(closure is null)).Count());
+				Assert.AreEqual(0, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
 			}
 			//Logging.Log(actualLogs.Join("\n"));
 		}
@@ -384,10 +538,10 @@ namespace LbmLib.Language.Experimental.Tests
 				if (i % 5 == 0)
 				{
 					//Logging.Log($"DEBUG before {i} GC:\n" + ClosureMethod.DelegateRegistry);
-					Assert.AreEqual(i == 5 ? 5 : 6, ClosureMethod.DelegateClosures.Where(closure => !(closure is null)).Count());
+					Assert.AreEqual(i == 5 ? 5 : 6, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
 					TryFullGCFinalization();
 					//Logging.Log($"DEBUG after {i} GC:\n" + ClosureMethod.DelegateRegistry);
-					Assert.AreEqual(1, ClosureMethod.DelegateClosures.Where(closure => !(closure is null)).Count());
+					Assert.AreEqual(1, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
 				}
 			}
 			// Test that the latest partially applied method delegate still works.
