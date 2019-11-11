@@ -9,11 +9,13 @@ namespace LbmLib.Language.Tests
 	public class ChainedListTests
 	{
 		[Test]
-		public void ChainConcat_TwoLists()
+		public void ChainConcat_Lists()
 		{
 			var left = new List<string> { "a", "b", "c" };
 			var right = new List<string> { "c", "d" };
 			var chained = left.ChainConcat(right);
+			Assert.IsFalse(chained.IsReadOnly);
+			Assert.IsFalse(ChainedListExtensions.IsFixedSize(chained));
 			AssertChainedListSanity(left, right, chained);
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "c", "d" }, chained);
 			Assert.AreEqual(chained.GetType().ToString(), chained.ToString());
@@ -41,7 +43,7 @@ namespace LbmLib.Language.Tests
 			AssertChainedListSanity(left, right, chained);
 			chained.RemoveAt(2);
 			AssertChainedListSanity(left, right, chained);
-			Assert.Throws(typeof(ArgumentOutOfRangeException), () => chained.RemoveAt(chained.Count + 1));
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => chained.RemoveAt(chained.Count));
 			CollectionAssert.AreEqual(new[] { "a", "b" }, left);
 			CollectionAssert.AreEqual(new[] { "d2", "e", "f" }, right);
 			var array1 = new string[chained.Count];
@@ -50,6 +52,15 @@ namespace LbmLib.Language.Tests
 			var array2 = new string[chained.Count + 2];
 			chained.CopyTo(array2, 2);
 			CollectionAssert.AreEqual(new[] { null, null, "a", "b", "d2", "e", "f" }, array2);
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => _ = chained[-1]);
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => _ = chained[chained.Count]);
+			chained[1] = "b2";
+			chained[2] = "d3";
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => chained[-1] = "error");
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => chained[chained.Count] = "error");
+			AssertChainedListSanity(left, right, chained);
+			CollectionAssert.AreEqual(new[] { "a", "b2" }, left);
+			CollectionAssert.AreEqual(new[] { "d3", "e", "f" }, right);
 			chained.Clear();
 			AssertChainedListSanity(left, right, chained);
 			CollectionAssert.AreEqual(new string[0], left);
@@ -58,19 +69,43 @@ namespace LbmLib.Language.Tests
 		}
 
 		[Test]
-		public void ChainConcat_TwoArrays()
+		public void ChainConcat_Arrays()
 		{
-			var left = new[] { "a", "b", "c" };
-			var right = new[] { "c", "d" };
-			var chained = left.ChainConcat(right);
-			CommonReadOnlyChainListTests(left, right, chained);
+			IList<string> left, right;
+			left = new[] { "a", "b", "c" };
+			right = new[] { "c", "d" };
+			CommonFixedSizeOrReadOnlyChainListTests(left, right, left.ChainConcat(right), isReadOnly: false);
+			left = new[] { "a", "b", "c" };
+			right = new List<string>() { "c", "d" };
+			CommonFixedSizeOrReadOnlyChainListTests(left, right, left.ChainConcat(right), isReadOnly: false);
+			left = new List<string>() { "a", "b", "c" };
+			right = new[] { "c", "d" };
+			CommonFixedSizeOrReadOnlyChainListTests(left, right, left.ChainConcat(right), isReadOnly: false);
 		}
 
-		static void CommonReadOnlyChainListTests(IList<string> left, IList<string> right, IList<string> chained)
+		[Test]
+		public void ChainConcat_ReadOnlyLists()
 		{
+			var left = new List<string>() { "a", "b", "c" };
+			var right = new List<string>() { "c", "d" };
+			var leftReadOnly = left.AsReadOnly();
+			var rightReadOnly = right.AsReadOnly();
+			CommonFixedSizeOrReadOnlyChainListTests(left, rightReadOnly, left.ChainConcat(rightReadOnly), isReadOnly: true);
+			CommonFixedSizeOrReadOnlyChainListTests(leftReadOnly, right, leftReadOnly.ChainConcat(right), isReadOnly: true);
+			CommonFixedSizeOrReadOnlyChainListTests(leftReadOnly, rightReadOnly, leftReadOnly.ChainConcat(rightReadOnly), isReadOnly: true);
+		}
+
+		static void CommonFixedSizeOrReadOnlyChainListTests(IList<string> left, IList<string> right, IList<string> chained, bool isReadOnly)
+		{
+			Assert.AreEqual(ChainedListExtensions.IsReadOnly(left) || ChainedListExtensions.IsReadOnly(right), isReadOnly);
+			Assert.AreEqual(chained.IsReadOnly, isReadOnly);
+			Assert.IsTrue(ChainedListExtensions.IsFixedSize(left) || ChainedListExtensions.IsFixedSize(right));
+			Assert.IsTrue(ChainedListExtensions.IsFixedSize(chained));
 			AssertChainedListSanity(left, right, chained);
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "c", "d" }, chained);
 			Assert.AreEqual(chained.GetType().ToString(), chained.ToString());
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => _ = chained[-1]);
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => _ = chained[chained.Count]);
 			Assert.Throws(typeof(NotSupportedException), () => chained.Add("e"));
 			Assert.AreEqual(2, chained.IndexOf("c"));
 			Assert.AreEqual(4, chained.IndexOf("d"));
@@ -79,17 +114,38 @@ namespace LbmLib.Language.Tests
 			Assert.Throws(typeof(NotSupportedException), () => chained.Insert(3, "d2"));
 			Assert.Throws(typeof(NotSupportedException), () => chained.Insert(chained.Count, "f"));
 			Assert.Throws(typeof(NotSupportedException), () => chained.RemoveAt(2));
+			Assert.Throws(typeof(NotSupportedException), () => chained.RemoveAt(chained.Count));
 			var array1 = new string[chained.Count];
 			chained.CopyTo(array1, 0);
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "c", "d" }, array1);
 			var array2 = new string[chained.Count + 2];
 			chained.CopyTo(array2, 2);
 			CollectionAssert.AreEqual(new[] { null, null, "a", "b", "c", "c", "d" }, array2);
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => _ = chained[-1]);
+			Assert.Throws(typeof(ArgumentOutOfRangeException), () => _ = chained[chained.Count]);
+			if (isReadOnly)
+			{
+				Assert.Throws(typeof(NotSupportedException), () => chained[1] = "b2");
+				Assert.Throws(typeof(NotSupportedException), () => chained[2] = "d3");
+				Assert.Throws(typeof(NotSupportedException), () => chained[-1] = "error");
+				Assert.Throws(typeof(NotSupportedException), () => chained[chained.Count] = "error");
+				AssertChainedListSanity(left, right, chained);
+				CollectionAssert.AreEqual(new[] { "a", "b", "c" }, left);
+				CollectionAssert.AreEqual(new[] { "c", "d" }, right);
+				CollectionAssert.AreEqual(new[] { "a", "b", "c", "c", "d" }, chained);
+			}
+			else
+			{
+				chained[2] = "c2";
+				chained[3] = "c3";
+				Assert.Throws(typeof(ArgumentOutOfRangeException), () => chained[-1] = "error");
+				Assert.Throws(typeof(ArgumentOutOfRangeException), () => chained[chained.Count] = "error");
+				AssertChainedListSanity(left, right, chained);
+				CollectionAssert.AreEqual(new[] { "a", "b", "c2" }, left);
+				CollectionAssert.AreEqual(new[] { "c3", "d" }, right);
+				CollectionAssert.AreEqual(new[] { "a", "b", "c2", "c3", "d" }, chained);
+			}
 			Assert.Throws(typeof(NotSupportedException), () => chained.Clear());
-			AssertChainedListSanity(left, right, chained);
-			CollectionAssert.AreEqual(new[] { "a", "b", "c" }, left);
-			CollectionAssert.AreEqual(new[] { "c", "d" }, right);
-			CollectionAssert.AreEqual(new[] { "a", "b", "c", "c", "d" }, chained);
 		}
 
 		[Test]
@@ -158,7 +214,7 @@ namespace LbmLib.Language.Tests
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "d" }, list.ChainAppend("d"));
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "d", "e" }, list.ChainAppend("d", "e"));
 			var itemsToAppend = new[] { "c", "d" };
-			CommonReadOnlyChainListTests(list, itemsToAppend, list.ChainAppend(itemsToAppend));
+			CommonFixedSizeOrReadOnlyChainListTests(list, itemsToAppend, list.ChainAppend(itemsToAppend), isReadOnly: false);
 		}
 
 		[Test]
@@ -169,7 +225,7 @@ namespace LbmLib.Language.Tests
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "c" }, list.ChainAppend("c"));
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "c", "d" }, list.ChainAppend("c", "d"));
 			var itemsToAppend = new[] { "c", "d" };
-			CommonReadOnlyChainListTests(list, itemsToAppend, list.ChainAppend(itemsToAppend));
+			CommonFixedSizeOrReadOnlyChainListTests(list, itemsToAppend, list.ChainAppend(itemsToAppend), isReadOnly: false);
 		}
 
 		[Test]
@@ -180,7 +236,7 @@ namespace LbmLib.Language.Tests
 			CollectionAssert.AreEqual(new[] { "c", "c", "d" }, list.ChainPrepend("c"));
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "c", "d" }, list.ChainPrepend("a", "b", "c"));
 			var itemsToPrepend = new[] { "a", "b", "c" };
-			CommonReadOnlyChainListTests(itemsToPrepend, list, list.ChainPrepend(itemsToPrepend));
+			CommonFixedSizeOrReadOnlyChainListTests(itemsToPrepend, list, list.ChainPrepend(itemsToPrepend), isReadOnly: false);
 		}
 
 		[Test]
@@ -191,7 +247,7 @@ namespace LbmLib.Language.Tests
 			CollectionAssert.AreEqual(new[] { "c", "c", "d" }, list.ChainPrepend("c"));
 			CollectionAssert.AreEqual(new[] { "a", "b", "c", "c", "d" }, list.ChainPrepend("a", "b", "c"));
 			var itemsToPrepend = new[] { "a", "b", "c" };
-			CommonReadOnlyChainListTests(itemsToPrepend, list, list.ChainPrepend(itemsToPrepend));
+			CommonFixedSizeOrReadOnlyChainListTests(itemsToPrepend, list, list.ChainPrepend(itemsToPrepend), isReadOnly: false);
 		}
 
 		static void AssertChainedListSanity<T>(IList<T> left, IList<T> right, IList<T> chained)
@@ -199,7 +255,6 @@ namespace LbmLib.Language.Tests
 			var concated = left.Concat(right).ToList();
 			CollectionAssert.AreEqual(concated, chained);
 			Assert.AreEqual(concated.Count, chained.Count);
-			Assert.AreEqual(left.IsReadOnly || right.IsReadOnly, chained.IsReadOnly);
 			for (var index = 0; index < concated.Count; index++)
 				Assert.AreEqual(concated[index], chained[index]);
 			using (IEnumerator<T> concatedIter = concated.GetEnumerator(), chainedIter = chained.GetEnumerator())

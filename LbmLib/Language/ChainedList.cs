@@ -1,15 +1,20 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace LbmLib.Language
 {
 	public static class ChainedListExtensions
 	{
+		[MethodImpl(256)] // AggressiveInlining
 		public static IList<T> ChainConcat<T>(this IList<T> left, IList<T> right) => new ChainedList<T>(left, right);
 
+		[MethodImpl(256)] // AggressiveInlining
 		public static IList<T> ChainAppend<T>(this IList<T> list, params T[] itemsToAppend) => new ChainedList<T>(list, itemsToAppend);
 
+		[MethodImpl(256)] // AggressiveInlining
 		public static IList<T> ChainPrepend<T>(this IList<T> list, params T[] itemsToPrepend) => new ChainedList<T>(itemsToPrepend, list);
 
 		// An IList that chains two ILists together, the first list being the left list, the second list being the right list.
@@ -18,19 +23,18 @@ namespace LbmLib.Language
 		// For the edge case where an item is being inserted at an index in between the two lists, it is inserted at the end of the left list.
 		// More than two ILists together fluently into a recursive ChainedList structure, e.g. listA.ChainConcat(listB).ChainConcat(listC).
 		// Note: This is NOT thread-safe, even if both lists are thread-safe.
-		class ChainedList<T> : IList<T>
+		class ChainedList<T> : IList<T>, IList
 		{
 			readonly IList<T> left;
 			readonly IList<T> right;
+			readonly bool isReadOnly;
+			readonly bool isFixedSize;
 
 			internal ChainedList(IList<T> left, IList<T> right)
 			{
-				var leftReadOnly = left.IsReadOnly;
-				var rightReadOnly = right.IsReadOnly;
-				if (!leftReadOnly && rightReadOnly)
-					left = left.AsReadOnly();
-				else if (leftReadOnly && !rightReadOnly)
-					right = right.AsReadOnly();
+				isReadOnly = IsReadOnly(left) || IsReadOnly(right);
+				// Assertion: isReadOnly implies isFixedSize.
+				isFixedSize = isReadOnly || IsFixedSize(left) || IsFixedSize(right);
 				this.left = left;
 				this.right = right;
 			}
@@ -47,6 +51,8 @@ namespace LbmLib.Language
 				}
 				set
 				{
+					if (isReadOnly)
+						throw new NotSupportedException();
 					var leftCount = left.Count;
 					if (index < leftCount)
 						left[index] = value;
@@ -55,14 +61,38 @@ namespace LbmLib.Language
 				}
 			}
 
+			object IList.this[int index]
+			{
+				get => this[index];
+				set => this[index] = (T)value;
+			}
+
 			public int Count => left.Count + right.Count;
 
-			public bool IsReadOnly => left.IsReadOnly;
+			public bool IsReadOnly => isReadOnly;
 
-			public void Add(T item) => right.Add(item);
+			bool IList.IsReadOnly => isReadOnly;
+
+			bool IList.IsFixedSize => isFixedSize;
+
+			int ICollection.Count => Count;
+
+			// The left and right ILists are not managed by ChainedList itself, so there's no way to guarantee a locked object can synchronize both.
+			object ICollection.SyncRoot => throw new NotSupportedException();
+
+			bool ICollection.IsSynchronized => false;
+
+			public void Add(T item)
+			{
+				if (isFixedSize)
+					throw new NotSupportedException();
+				right.Add(item);
+			}
 
 			public void Clear()
 			{
+				if (isFixedSize)
+					throw new NotSupportedException();
 				left.Clear();
 				right.Clear();
 			}
@@ -99,6 +129,8 @@ namespace LbmLib.Language
 
 			public void Insert(int index, T item)
 			{
+				if (isFixedSize)
+					throw new NotSupportedException();
 				var leftCount = left.Count;
 				if (index <= leftCount)
 					left.Insert(index, item);
@@ -108,6 +140,8 @@ namespace LbmLib.Language
 
 			public bool Remove(T item)
 			{
+				if (isFixedSize)
+					throw new NotSupportedException();
 				if (left.Remove(item))
 					return true;
 				else
@@ -116,6 +150,8 @@ namespace LbmLib.Language
 
 			public void RemoveAt(int index)
 			{
+				if (isFixedSize)
+					throw new NotSupportedException();
 				var leftCount = left.Count;
 				if (index < leftCount)
 					left.RemoveAt(index);
@@ -142,7 +178,33 @@ namespace LbmLib.Language
 					return leftStr + "," + rightStr;
 			}
 
+			int IList.Add(object value)
+			{
+				Add((T)value);
+				return Count - 1;
+			}
+
+			void IList.Clear() => Clear();
+
+			bool IList.Contains(object value) => Contains((T)value);
+
+			void ICollection.CopyTo(Array array, int index) => CopyTo((T[])array, index);
+
 			IEnumerator IEnumerable.GetEnumerator() => Enumerable.Concat(left, right).GetEnumerator();
+
+			int IList.IndexOf(object value) => IndexOf((T)value);
+
+			void IList.Insert(int index, object value) => Insert(index, (T)value);
+
+			void IList.Remove(object value) => Remove((T)value);
+
+			void IList.RemoveAt(int index) => RemoveAt(index);
 		}
+
+		// Workaround for the bullshit where ((IList<T>)array).IsReadOnly is true, yet array.IsReadonly is false.
+		internal static bool IsReadOnly<T>(IList<T> list) => list is Array ? false : list.IsReadOnly;
+
+		// If the IList doesn't implement List, assume it doesn't have a fixed size.
+		internal static bool IsFixedSize<T>(IList<T> list) => list is IList nonGenericList ? nonGenericList.IsFixedSize : false;
 	}
 }
