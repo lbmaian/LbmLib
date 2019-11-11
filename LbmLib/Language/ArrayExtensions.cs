@@ -6,20 +6,20 @@ namespace LbmLib.Language
 	public static class ArrayExtensions
 	{
 		// More Array-specific version of Enumerable.Concat.
-		public static T[] Append<T>(this T[] array, params T[] toAppend)
+		public static T[] Append<T>(this T[] array, params T[] itemsToAppend)
 		{
 			var arrayLength = array.Length;
-			var toAppendLength = toAppend.Length;
-			var combinedArray = new T[arrayLength + toAppendLength];
+			var itemsToAppendLength = itemsToAppend.Length;
+			var combinedArray = new T[arrayLength + itemsToAppendLength];
 			Array.Copy(array, 0, combinedArray, 0, arrayLength);
-			Array.Copy(toAppend, 0, combinedArray, arrayLength, toAppendLength);
+			Array.Copy(itemsToAppend, 0, combinedArray, arrayLength, itemsToAppendLength);
 			return combinedArray;
 		}
 
 		[MethodImpl(256)] // AggressiveInlining
-		public static T[] Prepend<T>(this T[] array, params T[] toPrepend)
+		public static T[] Prepend<T>(this T[] array, params T[] itemsToPrepend)
 		{
-			return toPrepend.Append(array);
+			return itemsToPrepend.Append(array);
 		}
 
 		// Faster and more convenient that (T[])array.Clone().

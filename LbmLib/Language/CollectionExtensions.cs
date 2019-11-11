@@ -7,8 +7,31 @@ using System.Text;
 
 namespace LbmLib.Language
 {
+	// Various extension methods for IEnumerable, ICollection, IList, and IDictionary.
 	public static class CollectionExtensions
 	{
+#if NET35 || NET45
+		// Enumerable.Append was added in .NET Framework 4.7.1 and .NET Core 1.0.
+		public static IEnumerable<TSource> Append<TSource>(this IEnumerable<TSource> source, TSource element)
+		{
+			if (source is null)
+				throw new ArgumentNullException(nameof(source));
+			foreach (var item in source)
+				yield return item;
+			yield return element;
+		}
+
+		// Enumerable.Prepend was added in .NET Framework 4.7.1 and .NET Core 1.0.
+		public static IEnumerable<TSource> Prepend<TSource>(this IEnumerable<TSource> source, TSource element)
+		{
+			if (source is null)
+				throw new ArgumentNullException(nameof(source));
+			yield return element;
+			foreach (var item in source)
+				yield return item;
+		}
+#endif
+
 		[MethodImpl(256)] // AggressiveInlining
 		public static List<T> AsList<T>(this IEnumerable<T> enumerable)
 		{
@@ -60,7 +83,7 @@ namespace LbmLib.Language
 			return range;
 		}
 
-		// XXX: Needs a better name.
+		// XXX: Needs a better name?
 		public static List<T> PopAll<T>(this ICollection<T> collection)
 		{
 			var collectionCopy = new List<T>(collection);
@@ -68,7 +91,7 @@ namespace LbmLib.Language
 			return collectionCopy;
 		}
 
-		// XXX: Needs a better name.
+		// XXX: Needs a better name?
 		public static List<T> PopAll<T>(this ICollection<T> collection, Func<T, bool> match)
 		{
 			var removedItems = new List<T>();
@@ -84,7 +107,7 @@ namespace LbmLib.Language
 			return removedItems;
 		}
 
-		// XXX: Needs a better name.
+		// XXX: Needs a better name?
 		public static List<T> PopRange<T>(this IList<T> list, int index, int count)
 		{
 			var range = list.GetRange(index, count);
@@ -106,7 +129,7 @@ namespace LbmLib.Language
 			return list;
 		}
 
-		public static int RemoveAll<K, V>(this Dictionary<K, V> dictionary, Func<K, bool> keyPredicate = null, Func<V, bool> valuePredicate = null,
+		public static int RemoveAll<K, V>(this IDictionary<K, V> dictionary, Func<K, bool> keyPredicate = null, Func<V, bool> valuePredicate = null,
 			Func<KeyValuePair<K, V>, bool> pairPredicate = null)
 		{
 			int removeCount = 0;
