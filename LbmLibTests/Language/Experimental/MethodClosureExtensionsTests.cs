@@ -87,7 +87,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var method = GetType().GetMethod(nameof(SimpleStaticVoidMethod));
 				var fixedArguments = new object[] { "hello world", 20 };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
-				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
 				partialAppliedMethod.Invoke(null, new object[] { 40L, 20 });
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Action<long, int>>();
 				partialAppliedDelegate(30L, 10);
@@ -116,7 +116,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var method = GetType().GetMethod(nameof(SimpleStaticNonVoidMethod));
 				var fixedArguments = new object[] { "hello world", 1, 2L };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
-				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
 				var returnValue = partialAppliedMethod.Invoke(null, new object[] { 3 });
 				Assert.AreEqual("asdf", returnValue);
 				// Static method can be invoked with a non-null target - target is just ignored in this case.
@@ -174,7 +174,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
 				var fixedArguments = new object[] { 5 };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
-				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
 				partialAppliedMethod.Invoke(v, new object[] { new string[] { "hello", "world" } });
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(v);
 				partialAppliedDelegate("hi", "there");
@@ -202,7 +202,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var method = typeof(TestClass).GetMethod(nameof(TestClass.SimpleInstanceNonVoidMethod));
 				var fixedArguments = new object[] { 5 };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
-				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
 				var returnValue = (string)partialAppliedMethod.Invoke(c, new object[] { new string[] { "hello", "world" } });
 				Assert.AreEqual("ghkj", returnValue);
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<string[], string>>(c);
@@ -232,7 +232,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var method = typeof(TestClass).GetMethod(nameof(TestClass.SimpleVirtualInstanceVoidMethod));
 				var fixedArguments = new object[] { 5 };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
-				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
 				partialAppliedMethod.Invoke(c, new object[] { new string[] { "hello", "world" } });
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(c);
 				partialAppliedDelegate("hi", "there");
@@ -342,7 +342,7 @@ namespace LbmLib.Language.Experimental.Tests
 				Assert.AreEqual("static void LbmLib.Language.Experimental.Tests.MethodClosureExtensionsTests::FancyStaticVoidMethod" +
 					"(#hello world#, #TestStruct{10}#, #20#, #TestClass{30}#, #null#, #List<string> { qwerty }#, #40#, ref int x)",
 					partialAppliedMethod.ToDebugString());
-				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
 				CollectionAssert.AreEqual(method.GetParameters().CopyToEnd(fixedArguments.Length), partialAppliedMethod.GetParameters());
 				var nonFixedArguments = new object[] { 20 };
 				partialAppliedMethod.Invoke(null, nonFixedArguments);
@@ -394,7 +394,7 @@ namespace LbmLib.Language.Experimental.Tests
 					"LbmLib.Language.Experimental.Tests.MethodClosureExtensionsTests::LbmLib.Language.Experimental.Tests.TestClass @null, " +
 					"System.Collections.Generic.List<string> sl, long l, ref int x)",
 					partialAppliedMethod.ToDebugString());
-				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.GetFixedArguments());
+				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
 				CollectionAssert.AreEqual(method.GetParameters().CopyToEnd(fixedArguments.Length), partialAppliedMethod.GetParameters());
 				var nonFixedArguments = new object[] { null, new List<string>() { "uiop" }, 40L, 20 };
 				var returnValue = (List<string[]>)partialAppliedMethod.Invoke(null, nonFixedArguments);

@@ -21,15 +21,13 @@ namespace LbmLib.Language.Experimental
 
 		public object FixedThisArgument { get; }
 
-		internal object[] FixedArguments;
-
-		public object[] GetFixedArguments() => FixedArguments.Copy();
+		public IRefList<object> FixedArguments { get; }
 
 		// Lazily computed.
 		string methodName;
 
 		internal ClosureMethod(MethodInfo originalMethod, MethodAttributes methodAttributes, ParameterInfo[] nonFixedParameterInfos,
-			MethodInfo genericMethodDefinition, object fixedThisArgument, object[] fixedArguments)
+			MethodInfo genericMethodDefinition, object fixedThisArgument, IRefList<object> fixedArguments)
 		{
 			OriginalMethod = originalMethod;
 			this.methodAttributes = methodAttributes;
@@ -44,11 +42,11 @@ namespace LbmLib.Language.Experimental
 		internal class ClosureDelegateRegistry
 		{
 			// Closures is the actual registry of fixedArguments arrays, with closureKey being an index into it.
-			// It's an object[] rather than a custom struct so that other assemblies can more easily access it, as is required with DebugDynamicMethodBuilder,
-			// since other assemblies can only access public structures, fields, etc.
+			// It's an IRefList<object> rather than a custom struct so that other assemblies can more easily access it,
+			// as is required with DebugDynamicMethodBuilder, since other assemblies can only access public structures, fields, etc.
 			// (or else would require expensive reflection within the dynamically-generated method).
 			// DebugDynamicMethodBuilder's build type will have its own field that stores a reference to this Closures object.
-			internal readonly List<object[]> Closures = new List<object[]>();
+			internal readonly List<IRefList<object>> Closures = new List<IRefList<object>>();
 
 #if NET35
 			readonly List<WeakReference> WeakReferences = new List<WeakReference>();
@@ -78,7 +76,7 @@ namespace LbmLib.Language.Experimental
 				}
 			}
 
-			public void Register(int closureKey, object[] closure, Delegate closureDelegate)
+			public void Register(int closureKey, IRefList<object> closure, Delegate closureDelegate)
 			{
 				lock (this)
 				{
@@ -221,11 +219,19 @@ namespace LbmLib.Language.Experimental
 		public override object Invoke(object obj, BindingFlags invokeAttr, Binder binder, object[] parameters, CultureInfo culture)
 		{
 			// TODO: Could lazily optimize this with a delegate that accepts as parameters: fixedArguments, parameters.
-			var combinedArguments = FixedArguments.Append(parameters);
+			var fixedArgumentCount = FixedArguments.Count;
+			var parameterCount = parameters.Length;
+			var combinedArguments = new object[fixedArgumentCount + parameterCount];
+			FixedArguments.CopyTo(combinedArguments, 0);
+			parameters.CopyTo(combinedArguments, fixedArgumentCount);
 			var returnValue = OriginalMethod.Invoke(FixedThisArgument ?? obj, invokeAttr, binder, combinedArguments, culture);
 			// In case any of the parameters are by-ref, copy back from combinedArguments to parameters.
 			// TODO: Don't need to do this if there are no by-ref parameters.
-			Array.Copy(combinedArguments, FixedArguments.Length, parameters, 0, parameters.Length);
+			for (var index = 0; index < fixedArgumentCount; index++)
+			{
+				FixedArguments[index] = combinedArguments[index];
+			}
+			Array.Copy(combinedArguments, fixedArgumentCount, parameters, 0, parameterCount);
 			return returnValue;
 		}
 
@@ -247,7 +253,7 @@ namespace LbmLib.Language.Experimental
 				{
 					methodName = OriginalMethod.Name + "_" +
 						(FixedThisArgument is null ? "unbound" : ReplaceInvalidNameCharactersWithUnderscores(FixedThisArgument));
-					if (FixedArguments.Length > 0)
+					if (FixedArguments.Count > 0)
 						methodName += "_" + FixedArguments.Select(ReplaceInvalidNameCharactersWithUnderscores).Join("_");
 				}
 				return methodName;
@@ -302,7 +308,7 @@ namespace LbmLib.Language.Experimental
 				throw new InvalidOperationException(ToString() + " is not a GenericMethodDefinition. " +
 					"MakeGenericMethod may only be called on a method for which MethodBase.IsGenericMethodDefinition is true.");
 			var genericMethod = OriginalMethod.MakeGenericMethod(typeArguments);
-			return new ClosureMethod(genericMethod, methodAttributes, genericMethod.GetParameters().CopyToEnd(FixedArguments.Length),
+			return new ClosureMethod(genericMethod, methodAttributes, genericMethod.GetParameters().CopyToEnd(FixedArguments.Count),
 				this, FixedThisArgument, FixedArguments);
 		}
 
@@ -369,6 +375,8 @@ namespace LbmLib.Language.Experimental
 		[MethodImpl(256)] // AggressiveInlining
 		public static T CreateDelegate<T>(this MethodInfo method, object target) where T : Delegate => (T)method.CreateDelegate(typeof(T), target);
 
+		static readonly IRefList<object> EmptyRefList = new object[0].AsRefList();
+
 		public static ClosureMethod Bind(this MethodInfo method, object target)
 		{
 			if (target is null)
@@ -381,10 +389,10 @@ namespace LbmLib.Language.Experimental
 			var genericMethodDefinition = method.IsGenericMethod ? method.GetGenericMethodDefinition() : null;
 			if (method is ClosureMethod closureMethod)
 				return new ClosureMethod(closureMethod.OriginalMethod, closureMethod.Attributes | MethodAttributes.Static, closureMethod.GetParameters(),
-					genericMethodDefinition, target, closureMethod.FixedArguments.Copy());
+					genericMethodDefinition, target, closureMethod.FixedArguments);
 			else
 				return new ClosureMethod(method, method.Attributes | MethodAttributes.Static, method.GetParameters(),
-					genericMethodDefinition, target, new object[0]);
+					genericMethodDefinition, target, EmptyRefList);
 		}
 
 		public static ClosureMethod PartialApply(this MethodInfo method, params object[] fixedArguments)
@@ -432,41 +440,33 @@ namespace LbmLib.Language.Experimental
 			var nonFixedParameterInfos = parameterInfos.CopyToEnd(fixedArguments.Length);
 			if (method is ClosureMethod closureMethod)
 				return new ClosureMethod(closureMethod.OriginalMethod, closureMethod.Attributes, nonFixedParameterInfos,
-					genericMethodDefinition, closureMethod.FixedThisArgument, closureMethod.FixedArguments.Append(fixedArguments));
+					genericMethodDefinition, closureMethod.FixedThisArgument, closureMethod.FixedArguments.ChainAppend(fixedArguments));
 			else
-				return new ClosureMethod(method, method.Attributes, nonFixedParameterInfos, genericMethodDefinition, null, fixedArguments.Copy());
+				return new ClosureMethod(method, method.Attributes, nonFixedParameterInfos, genericMethodDefinition, null, fixedArguments.AsRefList());
 		}
 	}
 
 	partial class ClosureMethod
 	{
 		// For easy access within the delegate dynamic method.
-		static readonly List<object[]> DelegateClosures = DelegateRegistry.Closures;
+		static readonly List<IRefList<object>> DelegateClosures = DelegateRegistry.Closures;
 
 		static readonly MethodInfo GetCurrentMethodMethod = typeof(MethodBase).GetMethod(nameof(MethodBase.GetCurrentMethod));
-		static readonly MethodInfo ListItemGetMethod = typeof(List<object[]>).GetProperty("Item").GetGetMethod();
+		static readonly MethodInfo ListOfIRefListOfObjectItemGetMethod = typeof(List<IRefList<object>>).GetProperty("Item").GetGetMethod();
+		static readonly MethodInfo IRefListOfObjectItemGetMethod = typeof(IRefList<object>).GetProperty("Item").GetGetMethod();
 		static readonly ConstructorInfo InvalidOperationExceptionConstructor = typeof(InvalidOperationException).GetConstructor(new[] { typeof(string) });
 		static readonly MethodInfo MethodBaseToDebugStringMethod = typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(MethodBase) });
 		static readonly MethodInfo StringFormat2Method = typeof(string).GetMethod(nameof(string.Format), new[] { typeof(string), typeof(object), typeof(object) });
 
-		internal static Delegate CreateClosureDelegate(Type delegateType, MethodInfo method, object fixedThisArgument, object[] fixedArguments)
+		internal static Delegate CreateClosureDelegate(Type delegateType, MethodInfo method, object fixedThisArgument, IRefList<object> fixedArguments)
 		{
 			// Assertion: (method is static AND fixedThisArgument is null) OR (method is instance and fixedThisArgument is non-null).
 			var parameters = method.GetParameters();
-			var fixedArgumentCount = fixedArguments.Length;
+			var fixedArgumentCount = fixedArguments.Count;
 			var nonFixedArgumentCount = parameters.Length - fixedArgumentCount;
 			var isStatic = method.IsStatic;
 			var declaringType = method.DeclaringType;
 			var returnType = method.ReturnType;
-
-			// Ref, in, and out parameters aren't allowed to be fixed arguments.
-			// TODO: Somehow support this - such fixed arguments would need to be stored in a temp variable and then passed via ldloca or ldelema?
-			for (var index = 0; index < fixedArgumentCount; index++)
-			{
-				var parameter = parameters[index];
-				if (parameter.ParameterType.IsByRef)
-					throw new ArgumentException("Cannot partial apply with a fixed argument that is a ref, in, or out parameter: " + parameter);
-			}
 
 			var nonFixedParameterTypes = new Type[nonFixedArgumentCount];
 			for (var index = 0; index < nonFixedArgumentCount; index++)
@@ -499,13 +499,12 @@ namespace LbmLib.Language.Experimental
 			if (!isStatic)
 			{
 				fixedArgumentCount++;
-				fixedArguments = fixedArguments.Prepend(fixedThisArgument);
+				fixedArguments = fixedArguments.ChainPrepend(fixedThisArgument);
 			}
 
 			// Create the non-constant fixed arguments that are stored in the closure, and loaded within the dynamic method if needed.
-			var fixedNonConstantArgumentsVar = default(LocalBuilder);
-			var fixedNonConstantArguments = fixedArguments.Where(fixedArgument => !ilGenerator.CanEmitConstant(fixedArgument)).ToArray();
-			if (fixedNonConstantArguments.Length > 0)
+			var fixedArgumentsVar = default(LocalBuilder);
+			if (fixedArguments.Any(fixedArgument => !ilGenerator.CanEmitConstant(fixedArgument)))
 			{
 				//ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method=\"{1}\"");
 				//ilGenerator.EmitLdcI4(closureKey);
@@ -516,10 +515,10 @@ namespace LbmLib.Language.Experimental
 				//ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
 
 				// Emit the code that loads the fixed arguments from ClosureMethod.ClosuresField into a local variable.
-				fixedNonConstantArgumentsVar = ilGenerator.DeclareLocal(typeof(object[]));
+				fixedArgumentsVar = ilGenerator.DeclareLocal(typeof(IRefList<object>));
 				ilGenerator.Emit(OpCodes.Ldsfld, methodBuilder.GetDelegateClosuresField());
 				ilGenerator.EmitLdcI4(closureKey);
-				ilGenerator.Emit(OpCodes.Call, ListItemGetMethod);
+				ilGenerator.Emit(OpCodes.Call, ListOfIRefListOfObjectItemGetMethod);
 				ilGenerator.Emit(OpCodes.Dup);
 				var foundClosureLabel = ilGenerator.DefineLabel();
 				ilGenerator.Emit(OpCodes.Brtrue_S, foundClosureLabel);
@@ -532,12 +531,12 @@ namespace LbmLib.Language.Experimental
 				ilGenerator.Emit(OpCodes.Newobj, InvalidOperationExceptionConstructor);
 				ilGenerator.Emit(OpCodes.Throw);
 				ilGenerator.MarkLabel(foundClosureLabel);
-				ilGenerator.EmitStloc(fixedNonConstantArgumentsVar);
+				ilGenerator.EmitStloc(fixedArgumentsVar);
 
 				//ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method: closure=\"{1}\"");
 				//ilGenerator.EmitLdcI4(closureKey);
 				//ilGenerator.Emit(OpCodes.Box, typeof(int));
-				//ilGenerator.EmitLdloc(fixedNonConstantArgumentsVar);
+				//ilGenerator.EmitLdloc(fixedArgumentsVar);
 				//ilGenerator.Emit(OpCodes.Call, typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(object) }));
 				//ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
 				//ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
@@ -551,17 +550,17 @@ namespace LbmLib.Language.Experimental
 			var useCallOpcode = isStatic || !method.IsVirtual || method.IsFinal;
 
 			// Emit fixed arguments, some that can be hard-coded in as constants, others needing the closure array.
-			var fixedNonConstantArgumentIndex = 0;
 			for (var index = 0; index < fixedArgumentCount; index++)
 			{
 				var fixedArgument = fixedArguments[index];
 				if (!ilGenerator.TryEmitConstant(fixedArgument))
 				{
 					// Need the closure at this point to obtain the fixed non-constant arguments.
-					ilGenerator.EmitLdloc(fixedNonConstantArgumentsVar);
-					ilGenerator.EmitLdcI4(fixedNonConstantArgumentIndex);
-					// fixedNonConstantArguments is an array of objects, so each element of it needs to be accessed by reference.
-					ilGenerator.Emit(OpCodes.Ldelem_Ref);
+					ilGenerator.EmitLdloc(fixedArgumentsVar);
+					ilGenerator.EmitLdcI4(index);
+					// fixedNonConstantArguments is an IRefList<object>.
+					// TODO: Support ref/in/out parameter fixed arguments - such fixed arguments would need to be stored in a temp variable and then passed via ldloca or ldelema?
+					ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
 					if (isStatic)
 					{
 						var fixedArgumentType = parameters[index].ParameterType;
@@ -591,7 +590,6 @@ namespace LbmLib.Language.Experimental
 								ilGenerator.Emit(OpCodes.Unbox_Any, fixedArgumentType);
 						}
 					}
-					fixedNonConstantArgumentIndex++;
 				}
 			}
 
@@ -609,7 +607,7 @@ namespace LbmLib.Language.Experimental
 			ilGenerator.Emit(OpCodes.Ret);
 
 			var closureDelegate = methodBuilder.CreateDelegate(delegateType);
-			DelegateRegistry.Register(closureKey, fixedNonConstantArguments, closureDelegate);
+			DelegateRegistry.Register(closureKey, fixedArguments, closureDelegate);
 			return closureDelegate;
 		}
 
@@ -692,7 +690,7 @@ namespace LbmLib.Language.Experimental
 						parameterTypes);
 
 					var delegateClosuresHolderTypeBuilder = moduleBuilder.DefineType(typeNamePrefix + "DelegateClosuresHolder");
-					delegateClosuresHolderTypeBuilder.DefineField(nameof(DelegateClosures), typeof(List<object[]>), FieldAttributes.Static);
+					delegateClosuresHolderTypeBuilder.DefineField(nameof(DelegateClosures), typeof(List<IRefList<object>>), FieldAttributes.Static);
 					var delegateClosuresHolderType = delegateClosuresHolderTypeBuilder.CreateType();
 					var delegateClosuresField = delegateClosuresHolderType.GetField(nameof(DelegateClosures),
 						BindingFlags.Static | BindingFlags.NonPublic);
