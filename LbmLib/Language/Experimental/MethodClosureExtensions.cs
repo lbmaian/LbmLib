@@ -5,7 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
+#if !NET35
+using System.Runtime.CompilerServices; // for ConditionalWeakTable
+#endif
 
 namespace LbmLib.Language.Experimental
 {
@@ -369,10 +371,8 @@ namespace LbmLib.Language.Experimental
 
 		// More convenient generic overloads of CreateDelegate.
 
-		[MethodImpl(256)] // AggressiveInlining
 		public static T CreateDelegate<T>(this MethodInfo method) where T : Delegate => (T)method.CreateDelegate(typeof(T));
 
-		[MethodImpl(256)] // AggressiveInlining
 		public static T CreateDelegate<T>(this MethodInfo method, object target) where T : Delegate => (T)method.CreateDelegate(typeof(T), target);
 
 		static readonly IRefList<object> EmptyRefList = new object[0].AsRefList();

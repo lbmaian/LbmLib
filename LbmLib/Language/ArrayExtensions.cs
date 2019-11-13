@@ -16,7 +16,6 @@ namespace LbmLib.Language
 			return combinedArray;
 		}
 
-		[MethodImpl(256)] // AggressiveInlining
 		public static T[] Prepend<T>(this T[] array, params T[] itemsToPrepend)
 		{
 			return itemsToPrepend.Append(array);

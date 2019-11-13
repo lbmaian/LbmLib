@@ -32,13 +32,11 @@ namespace LbmLib.Language
 		}
 #endif
 
-		[MethodImpl(256)] // AggressiveInlining
 		public static List<T> AsList<T>(this IEnumerable<T> enumerable)
 		{
 			return enumerable as List<T> ?? new List<T>(enumerable);
 		}
 
-		[MethodImpl(256)] // AggressiveInlining
 		public static List<T> AsList<T>(this IEnumerable enumerable)
 		{
 			return enumerable as List<T> ?? new List<T>(enumerable.Cast<T>());
