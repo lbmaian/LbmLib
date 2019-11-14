@@ -9,16 +9,16 @@ namespace LbmLib.Language
 	{
 		public static IList<T> ChainConcat<T>(this IList<T> left, IList<T> right)
 		{
-			if (left is IRefList<T> leftRefList)
+			if (left is IBaseRefList<T> leftRefList)
 			{
-				if (right is IRefList<T> rightRefList)
+				if (right is IBaseRefList<T> rightRefList)
 					return leftRefList.ChainConcat(rightRefList);
 				else if (right is T[] rightArray)
 					return leftRefList.ChainConcat(rightArray);
 			}
 			else if (left is T[] leftArray)
 			{
-				if (right is IRefList<T> rightRefList)
+				if (right is IBaseRefList<T> rightRefList)
 					return leftArray.ChainConcat(rightRefList);
 				else if (right is T[] rightArray)
 					return leftArray.ChainConcat(rightArray);

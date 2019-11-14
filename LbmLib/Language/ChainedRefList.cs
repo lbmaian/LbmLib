@@ -5,12 +5,21 @@ namespace LbmLib.Language
 {
 	public static class ChainedRefListExtensions
 	{
+		public static IBaseRefList<T> ChainConcat<T>(this IBaseRefList<T> left, IBaseRefList<T> right)
+		{
+			// Don't need to use ChainedListExtensions.IsReadOnly(list) helper function, since arrays can't implement IRefList anyway.
+			if (left.IsReadOnly || right.IsReadOnly)
+				return left.AsReadOnly().ChainConcat(right.AsReadOnly());
+			else
+				return left.AsNonReadOnly().ChainConcat(right.AsNonReadOnly());
+		}
+
+		public static IRefReadOnlyList<T> ChainConcat<T>(this IRefReadOnlyList<T> left, IRefReadOnlyList<T> right) =>
+			new ChainedRefReadOnlyList<T>(left, right);
+
 		public static IRefList<T> ChainConcat<T>(this IRefList<T> left, IRefList<T> right)
 		{
-			// Don't need to use ChainedListExtensions.IsReadOnly(list) helper function, since the arrays can't implement IRefList anyway.
-			if (left.IsReadOnly || right.IsReadOnly)
-				return new ChainedReadOnlyRefList<T>(left, right);
-			else if (ChainedListExtensions.IsFixedSize(left) || ChainedListExtensions.IsFixedSize(right))
+			if (ChainedListExtensions.IsFixedSize(left) || ChainedListExtensions.IsFixedSize(right))
 				return new ChainedFixedSizeRefList<T>(left, right);
 			else
 				return new ChainedRefList<T>(left, right);
@@ -19,23 +28,49 @@ namespace LbmLib.Language
 		public static IRefList<T> ChainConcat<T>(this T[] left, T[] right) =>
 			new ChainedFixedSizeRefList<T>(new ArrayRefList<T>(left), new ArrayRefList<T>(right));
 
+		public static IRefReadOnlyList<T> ChainConcat<T>(this IRefReadOnlyList<T> left, T[] right) =>
+			new ChainedRefReadOnlyList<T>(left, new ArrayRefReadOnlyList<T>(right));
+
+		public static IRefReadOnlyList<T> ChainConcat<T>(this T[] left, IRefReadOnlyList<T> right) =>
+			new ChainedRefReadOnlyList<T>(new ArrayRefReadOnlyList<T>(left), right);
+
 		public static IRefList<T> ChainConcat<T>(this IRefList<T> left, T[] right) =>
 			new ChainedFixedSizeRefList<T>(left, new ArrayRefList<T>(right));
 
 		public static IRefList<T> ChainConcat<T>(this T[] left, IRefList<T> right) =>
 			new ChainedFixedSizeRefList<T>(new ArrayRefList<T>(left), right);
 
-		public static IRefList<T> ChainAppend<T>(this IRefList<T> list, params T[] itemsToAppend) =>
-			new ChainedFixedSizeRefList<T>(list, new ArrayRefList<T>(itemsToAppend));
+		public static IBaseRefList<T> ChainConcat<T>(this IBaseRefList<T> left, T[] right)
+		{
+			if (left.IsReadOnly)
+				return left.AsReadOnly().ChainConcat(right);
+			else
+				return left.AsNonReadOnly().ChainConcat(right);
+		}
 
-		public static IRefList<T> ChainAppend<T>(this T[] array, params T[] itemsToAppend) =>
-			new ChainedFixedSizeRefList<T>(new ArrayRefList<T>(array), new ArrayRefList<T>(itemsToAppend));
+		public static IBaseRefList<T> ChainConcat<T>(this T[] left, IBaseRefList<T> right)
+		{
+			if (right.IsReadOnly)
+				return left.ChainConcat(right.AsReadOnly());
+			else
+				return left.ChainConcat(right.AsNonReadOnly());
+		}
 
-		public static IRefList<T> ChainPrepend<T>(this IRefList<T> list, params T[] itemsToPrepend) =>
-			new ChainedFixedSizeRefList<T>(new ArrayRefList<T>(itemsToPrepend), list);
+		public static IBaseRefList<T> ChainAppend<T>(this IBaseRefList<T> list, params T[] itemsToAppend) => list.ChainConcat(itemsToAppend);
 
-		public static IRefList<T> ChainPrepend<T>(this T[] array, params T[] itemsToPrepend) =>
-			new ChainedFixedSizeRefList<T>(new ArrayRefList<T>(itemsToPrepend), new ArrayRefList<T>(array));
+		public static IRefList<T> ChainAppend<T>(this IRefList<T> list, params T[] itemsToAppend) => list.ChainConcat(itemsToAppend);
+
+		public static IRefReadOnlyList<T> ChainAppend<T>(this IRefReadOnlyList<T> list, params T[] itemsToAppend) => list.ChainConcat(itemsToAppend);
+
+		public static IBaseRefList<T> ChainAppend<T>(this T[] array, params T[] itemsToAppend) => array.ChainConcat(itemsToAppend);
+
+		public static IBaseRefList<T> ChainPrepend<T>(this IBaseRefList<T> list, params T[] itemsToPrepend) => itemsToPrepend.ChainConcat(list);
+
+		public static IRefList<T> ChainPrepend<T>(this IRefList<T> list, params T[] itemsToPrepend) => itemsToPrepend.ChainConcat(list);
+
+		public static IRefReadOnlyList<T> ChainPrepend<T>(this IRefReadOnlyList<T> list, params T[] itemsToPrepend) => itemsToPrepend.ChainConcat(list);
+
+		public static IBaseRefList<T> ChainPrepend<T>(this T[] array, params T[] itemsToPrepend) => itemsToPrepend.ChainConcat(array);
 	}
 
 	abstract class AbstractChainedRefList<T> : BaseChainedList<T, IRefList<T>>, IRefList<T>
@@ -82,6 +117,10 @@ namespace LbmLib.Language
 		{
 		}
 
+		public IRefList<T> AsNonReadOnly() => this;
+
+		public IRefReadOnlyList<T> AsReadOnly() => new ChainedRefReadOnlyList<T>(left.AsReadOnly(), right.AsReadOnly());
+
 		public IRefListEnumerator<T> GetEnumerator() => new ChainedRefListEnumerator(left.GetEnumerator(), right.GetEnumerator());
 
 		public ref T ItemRef(int index)
@@ -106,9 +145,9 @@ namespace LbmLib.Language
 			set => InternalSet(index, value);
 		}
 
-		public override bool IsReadOnly => throw new NotImplementedException();
+		public override bool IsReadOnly => false;
 
-		private protected override bool IsFixedSize => throw new NotImplementedException();
+		private protected override bool IsFixedSize => false;
 
 		public override void Add(T item) => right.Add(item);
 
@@ -172,12 +211,52 @@ namespace LbmLib.Language
 		public override void RemoveAt(int index) => throw new NotSupportedException();
 	}
 
-	sealed class ChainedReadOnlyRefList<T> : AbstractChainedRefList<T>
+	sealed class ChainedRefReadOnlyList<T> : BaseChainedList<T, IRefReadOnlyList<T>>, IRefReadOnlyList<T>
 	{
-		internal ChainedReadOnlyRefList(IRefList<T> left, IRefList<T> right) : base(left, right)
+		struct ChainedRefReadOnlyListEnumerator : IRefReadOnlyListEnumerator<T>
+		{
+			readonly IRefReadOnlyListEnumerator<T> left;
+			readonly IRefReadOnlyListEnumerator<T> right;
+			int leftEndIndex;
+
+			internal ChainedRefReadOnlyListEnumerator(IRefReadOnlyListEnumerator<T> left, IRefReadOnlyListEnumerator<T> right)
+			{
+				this.left = left;
+				this.right = right;
+				leftEndIndex = -1;
+			}
+
+			public ref readonly T Current
+			{
+				[MethodImpl(256)] // AggressiveInlining
+				get => ref (leftEndIndex == -1 ? ref left.Current : ref right.Current);
+			}
+
+			public int CurrentIndex
+			{
+				[MethodImpl(256)] // AggressiveInlining
+				get => leftEndIndex == -1 ? left.CurrentIndex : leftEndIndex + right.CurrentIndex;
+			}
+
+			[MethodImpl(256)] // AggressiveInlining
+			public bool MoveNext()
+			{
+				if (leftEndIndex == -1)
+				{
+					if (left.MoveNext())
+						return true;
+					leftEndIndex = left.CurrentIndex;
+				}
+				return right.MoveNext();
+			}
+		}
+
+		internal ChainedRefReadOnlyList(IRefReadOnlyList<T> left, IRefReadOnlyList<T> right) : base(left, right)
 		{
 		}
 
+		// As this class isn't public, the indexer set accessor being public here doesn't matter.
+		// If this instance is cast as an IRefReadOnlyList<T>, then the indexer set accessor effectively isn't public.
 		public override T this[int index]
 		{
 			get => InternalGet(index);
@@ -187,6 +266,21 @@ namespace LbmLib.Language
 		public override bool IsReadOnly => true;
 
 		private protected override bool IsFixedSize => true;
+
+		public IRefList<T> AsNonReadOnly() => throw new NotSupportedException();
+
+		public IRefReadOnlyList<T> AsReadOnly() => this;
+
+		public IRefReadOnlyListEnumerator<T> GetEnumerator() => new ChainedRefReadOnlyListEnumerator(left.GetEnumerator(), right.GetEnumerator());
+
+		public ref readonly T ItemRef(int index)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+				return ref left.ItemRef(index);
+			else
+				return ref right.ItemRef(index - leftCount);
+		}
 
 		public override void Add(T item) => throw new NotSupportedException();
 
