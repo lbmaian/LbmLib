@@ -210,11 +210,13 @@ namespace LbmLib.Language.Experimental
 
 		public string ToDebugString(bool includeNamespace = true, bool includeDeclaringType = true)
 		{
+			var originalParameters = OriginalMethod.GetParameters();
 			return (IsStatic ? "static " : FixedThisArgument is null ? "" : "#" + FixedThisArgument.ToDebugString() + "#.") +
 				ReturnType.ToDebugString(includeNamespace, includeDeclaringType) + " " +
 				(!includeDeclaringType || DeclaringType is null ? "" : DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "::") +
 				OriginalMethod.Name + "(" + Enumerable.Concat(
-					FixedArguments.Select(argument => "#" + argument.ToDebugString() + "#"),
+					FixedArguments.Select((argument, index) =>
+						originalParameters[index].ToDebugString(includeNamespace, includeDeclaringType) + ": #" + argument.ToDebugString() + "#"),
 					GetParameters().Select(parameter => parameter.ToDebugString(includeNamespace, includeDeclaringType))).Join() + ")";
 		}
 
@@ -413,6 +415,8 @@ namespace LbmLib.Language.Experimental
 						"contains generic parameters and cannot have a fixed argument");
 				var fixedArgument = fixedArguments[index];
 				var parameterType = parameterInfo.ParameterType;
+				if (parameterType.IsByRef)
+					parameterType = parameterType.GetElementType();
 				if (fixedArgument is null)
 				{
 					if (parameterType.IsValueType)
@@ -454,6 +458,7 @@ namespace LbmLib.Language.Experimental
 		static readonly MethodInfo GetCurrentMethodMethod = typeof(MethodBase).GetMethod(nameof(MethodBase.GetCurrentMethod));
 		static readonly MethodInfo ListOfIRefListOfObjectItemGetMethod = typeof(List<IRefList<object>>).GetProperty("Item").GetGetMethod();
 		static readonly MethodInfo IRefListOfObjectItemGetMethod = typeof(IRefList<object>).GetProperty("Item").GetGetMethod();
+		static readonly MethodInfo IRefListOfObjectGetItemRefMethod = typeof(IRefList<object>).GetMethod(nameof(IRefList<object>.ItemRef));
 		static readonly ConstructorInfo InvalidOperationExceptionConstructor = typeof(InvalidOperationException).GetConstructor(new[] { typeof(string) });
 		static readonly MethodInfo MethodBaseToDebugStringMethod = typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(MethodBase) });
 		static readonly MethodInfo StringFormat2Method = typeof(string).GetMethod(nameof(string.Format), new[] { typeof(string), typeof(object), typeof(object) });
@@ -496,8 +501,10 @@ namespace LbmLib.Language.Experimental
 
 			// Since DynamicMethod can only be created as a static method, if method is an instance method (and thus fixedThisArgument is asserted to be non-null)
 			// we will need to prepend the fixed arguments with fixedThisArgument.
+			var prefixArgumentCount = 0;
 			if (!isStatic)
 			{
+				prefixArgumentCount = 1;
 				fixedArgumentCount++;
 				fixedArguments = fixedArguments.ChainPrepend(fixedThisArgument);
 			}
@@ -506,13 +513,15 @@ namespace LbmLib.Language.Experimental
 			var fixedArgumentsVar = default(LocalBuilder);
 			if (fixedArguments.Any(fixedArgument => !ilGenerator.CanEmitConstant(fixedArgument)))
 			{
-				//ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method=\"{1}\"");
-				//ilGenerator.EmitLdcI4(closureKey);
-				//ilGenerator.Emit(OpCodes.Box, typeof(int));
-				//ilGenerator.Emit(OpCodes.Call, GetCurrentMethodMethod);
-				//ilGenerator.Emit(OpCodes.Call, MethodBaseToDebugStringMethod);
-				//ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
-				//ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
+#if TRACE
+				ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method=\"{1}\"");
+				ilGenerator.EmitLdcI4(closureKey);
+				ilGenerator.Emit(OpCodes.Box, typeof(int));
+				ilGenerator.Emit(OpCodes.Call, GetCurrentMethodMethod);
+				ilGenerator.Emit(OpCodes.Call, MethodBaseToDebugStringMethod);
+				ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
+				ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
+#endif
 
 				// Emit the code that loads the fixed arguments from ClosureMethod.ClosuresField into a local variable.
 				fixedArgumentsVar = ilGenerator.DeclareLocal(typeof(IRefList<object>));
@@ -533,13 +542,15 @@ namespace LbmLib.Language.Experimental
 				ilGenerator.MarkLabel(foundClosureLabel);
 				ilGenerator.EmitStloc(fixedArgumentsVar);
 
-				//ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method: closure=\"{1}\"");
-				//ilGenerator.EmitLdcI4(closureKey);
-				//ilGenerator.Emit(OpCodes.Box, typeof(int));
-				//ilGenerator.EmitLdloc(fixedArgumentsVar);
-				//ilGenerator.Emit(OpCodes.Call, typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(object) }));
-				//ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
-				//ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
+#if TRACE
+				ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method: closure=\"{1}\"");
+				ilGenerator.EmitLdcI4(closureKey);
+				ilGenerator.Emit(OpCodes.Box, typeof(int));
+				ilGenerator.EmitLdloc(fixedArgumentsVar);
+				ilGenerator.Emit(OpCodes.Call, typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(object) }));
+				ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
+				ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
+#endif
 			}
 
 			// We'll be using a call opcode if the method is either (a) static, OR (b) instance AND the method is non-overrideable.
@@ -549,46 +560,58 @@ namespace LbmLib.Language.Experimental
 			// Object/ValueType/Enum or an interface, and fixedThisArgument needs to be boxed.
 			var useCallOpcode = isStatic || !method.IsVirtual || method.IsFinal;
 
+			// For instance methods, emit the first item in the closure array, which represents the fixedThisArgument.
+			if (!isStatic)
+			{
+				ilGenerator.EmitLdloc(fixedArgumentsVar);
+				ilGenerator.EmitLdcI4(0);
+				ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
+				if (useCallOpcode)
+				{
+					if (declaringType.IsValueType)
+						ilGenerator.Emit(OpCodes.Unbox, declaringType);
+				}
+				else
+				{
+					// If declaringType is a value type, fixedThisArgument needs to be boxed.
+					// Fortunately, since it's in the closures array, it's already boxed, so we don't need to do anything extra.
+				}
+			}
+
 			// Emit fixed arguments, some that can be hard-coded in as constants, others needing the closure array.
-			for (var index = 0; index < fixedArgumentCount; index++)
+			for (var index = prefixArgumentCount; index < fixedArgumentCount; index++)
 			{
 				var fixedArgument = fixedArguments[index];
-				if (!ilGenerator.TryEmitConstant(fixedArgument))
+				var fixedArgumentType = parameters[index - prefixArgumentCount].ParameterType;
+				var fixedArgumentIsByRef = fixedArgumentType.IsByRef;
+				if (fixedArgumentIsByRef || !ilGenerator.TryEmitConstant(fixedArgument))
 				{
-					// Need the closure at this point to obtain the fixed non-constant arguments.
+					// Need the closure at this point to obtain the fixed arguments.
 					ilGenerator.EmitLdloc(fixedArgumentsVar);
 					ilGenerator.EmitLdcI4(index);
-					// fixedNonConstantArguments is an IRefList<object>.
-					// TODO: Support ref/in/out parameter fixed arguments - such fixed arguments would need to be stored in a temp variable and then passed via ldloca or ldelema?
-					ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
-					if (isStatic)
+					if (fixedArgumentIsByRef)
 					{
-						var fixedArgumentType = parameters[index].ParameterType;
+						fixedArgumentType = fixedArgumentType.GetElementType();
 						if (fixedArgumentType.IsValueType)
-							ilGenerator.Emit(OpCodes.Unbox_Any, fixedArgumentType);
-					}
-					else
-					{
-						// Special-casing the instance method's fixedThisArgument for the call/callvirt opcode (see useCallOpcode comments).
-						if (index == 0)
 						{
-							if (useCallOpcode)
-							{
-								if (declaringType.IsValueType)
-									ilGenerator.Emit(OpCodes.Unbox, declaringType);
-							}
-							else
-							{
-								// If declaringType is a value type, fixedThisArgument needs to be boxed.
-								// Fortunately, since it's in the closures array, it's already boxed, so we don't need to do anything extra.
-							}
+							// This is the IRefList equivalent of the ldelem.ref instruction.
+							ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
+							// We have a boxed value, and we need a managed pointer to the value contained within the boxed value object.
+							ilGenerator.Emit(OpCodes.Unbox, fixedArgumentType);
 						}
 						else
 						{
-							var fixedArgumentType = parameters[index - 1].ParameterType;
-							if (fixedArgumentType.IsValueType)
-								ilGenerator.Emit(OpCodes.Unbox_Any, fixedArgumentType);
+							// This is the IRefList equivalent of the ldelema instruction.
+							ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectGetItemRefMethod);
 						}
+					}
+					else
+					{
+						// This is the IRefList equivalent of the ldelem.ref instruction.
+						ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
+						// If value type, we have a boxed value, so unbox it.
+						if (fixedArgumentType.IsValueType)
+							ilGenerator.Emit(OpCodes.Unbox_Any, fixedArgumentType);
 					}
 				}
 			}
