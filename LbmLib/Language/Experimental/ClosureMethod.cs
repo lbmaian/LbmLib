@@ -57,59 +57,53 @@ namespace LbmLib.Language.Experimental
 				new ConditionalWeakTable<Delegate, DeregisterUponFinalize>();
 #endif
 
-			int minimumFreeClosureKey = 0;
+			internal int MinimumFreeClosureKey = 0;
 
-			public int ReserveNextFreeClosureKey()
+			public int RegisterClosure(IRefList<object> closure)
 			{
 				// XXX: This is thread-locking and O(n) even with a minimum key optimization,
 				// but it should suffice for now, so long as delegate closures aren't created in the thousands or so.
+				int closureKey;
 				lock (this)
 				{
-					var delegateClosuresCount = Closures.Count;
-					while (minimumFreeClosureKey < delegateClosuresCount)
-					{
-						var closureKey = minimumFreeClosureKey;
-						minimumFreeClosureKey++;
-						if (Closures[closureKey] is null)
-							return closureKey;
-					}
-					minimumFreeClosureKey++;
-					return delegateClosuresCount;
+					closureKey = RegisterClosureInternal(closure);
 				}
+				Logging.Log($"DEBUG RegisterClosure(closure={closure.ToDebugString()}) => closureKey={closureKey}");
+				return closureKey;
 			}
 
-			public void Register(int closureKey, IRefList<object> closure, Delegate closureDelegate)
+			int RegisterClosureInternal(IRefList<object> closure)
+			{
+				var delegateClosuresCount = Closures.Count;
+				while (MinimumFreeClosureKey < delegateClosuresCount)
+				{
+					var closureKey = MinimumFreeClosureKey;
+					MinimumFreeClosureKey++;
+					if (Closures[closureKey] is null)
+					{
+						Closures[closureKey] = closure;
+						return closureKey;
+					}
+				}
+				MinimumFreeClosureKey++;
+				Closures.Add(closure);
+#if NET35
+				WeakReferences.Add(null);
+#endif
+				return delegateClosuresCount;
+			}
+
+			public void RegisterDelegate(int closureKey, Delegate closureDelegate)
 			{
 				lock (this)
 				{
-					var closureCount = Closures.Count;
-					if (closureKey < closureCount)
-					{
-						Closures[closureKey] = closure;
 #if NET35
-						WeakReferences[closureKey] = new WeakReference(closureDelegate);
-#endif
-					}
-					else
-					{
-						while (closureKey > closureCount)
-						{
-							Closures.Add(null);
-#if NET35
-							WeakReferences.Add(null);
-#endif
-							closureCount++;
-						}
-						Closures.Add(closure);
-#if NET35
-						WeakReferences.Add(new WeakReference(closureDelegate));
-#endif
-					}
-#if !NET35
+					WeakReferences[closureKey] = new WeakReference(closureDelegate);
+#else
 					WeakReferences.Add(closureDelegate, new DeregisterUponFinalize(closureKey));
 #endif
 				}
-				//Logging.Log($"DEBUG Register(closureKey={closureKey}, closure={closure.ToDebugString()} closureDelegate={closureDelegate.ToDebugString()})");
+				Logging.Log($"DEBUG RegisterDelegate(closureKey={closureKey}, closureDelegate={closureDelegate.ToDebugString()})");
 #if NET35
 				GCMonitor.EnsureStarted();
 #endif
@@ -120,13 +114,13 @@ namespace LbmLib.Language.Experimental
 				lock (this)
 				{
 					Closures[closureKey] = null;
-					if (minimumFreeClosureKey > closureKey)
-						minimumFreeClosureKey = closureKey;
+					if (MinimumFreeClosureKey > closureKey)
+						MinimumFreeClosureKey = closureKey;
 #if NET35
 					WeakReferences[closureKey] = null;
 #endif
 				}
-				//Logging.Log($"DEBUG Deregister(closureKey={closureKey}), minimumFreeClosureKey={minimumFreeClosureKey}");
+				Logging.Log($"DEBUG Deregister(closureKey={closureKey}) => minimumFreeClosureKey={MinimumFreeClosureKey}");
 			}
 
 #if NET35
@@ -148,11 +142,16 @@ namespace LbmLib.Language.Experimental
 					// Just referencing GCMonitor will call the static GCMonitor() method, so this method doesn't need to do anything itself.
 				}
 
+				GCMonitor()
+				{
+					Logging.Log("DEBUG GCMonitor()");
+				}
+
 				~GCMonitor()
 				{
 					try
 					{
-						//Logging.Log("DEBUG ~GCMonitor()");
+						Logging.Log("DEBUG ~GCMonitor()");
 						lock (DelegateRegistry)
 						{
 							var closures = DelegateRegistry.Closures;
@@ -369,26 +368,6 @@ namespace LbmLib.Language.Experimental
 				nonFixedParameterTypes[index] = parameters[fixedArgumentCount + index].ParameterType;
 			}
 
-			var closureKey = DelegateRegistry.ReserveNextFreeClosureKey();
-			var methodBuilder = (ClosureMethodGenerateDebugDll ?
-				(IDynamicMethodBuilderFactory)new DebugDynamicMethodBuilder.Factory() : new DynamicMethodBuilder.Factory()).Create(
-				method.Name + "_Closure_" + closureKey,
-				// Some (all?) .NET implementations only accept the following MethodAttributes/CallingConventions for DynamicMethod.
-				MethodAttributes.Public | MethodAttributes.Static,
-				CallingConventions.Standard,
-				declaringType,
-				returnType,
-				nonFixedParameterTypes);
-			for (int index = 0; index < nonFixedArgumentCount; index++)
-			{
-				var parameter = parameters[fixedArgumentCount + index];
-				// DefineParameter(0,...) refers to the return value, so for actual parameters, it's practically 1-based rather than 0-based.
-				methodBuilder.DefineParameter(index + 1, parameter.Attributes, parameter.Name);
-				// XXX: Do any custom attributes like ParamArrayAttribute need to be copied too?
-				// There's no good generic way to copy attributes as far as I can tell, since CustomAttributeBuilder is very cumbersome to use.
-			}
-			var ilGenerator = methodBuilder.GetILGenerator();
-
 			// Since DynamicMethod can only be created as a static method, if method is an instance method (and thus fixedThisArgument is asserted to be non-null)
 			// we will need to prepend the fixed arguments with fixedThisArgument.
 			var prefixArgumentCount = 0;
@@ -399,137 +378,166 @@ namespace LbmLib.Language.Experimental
 				fixedArguments = fixedArguments.ChainPrepend(fixedThisArgument);
 			}
 
-			// Create the non-constant fixed arguments that are stored in the closure, and loaded within the dynamic method if needed.
-			var fixedArgumentsVar = default(LocalBuilder);
-			if (fixedArguments.Any(fixedArgument => !ilGenerator.CanEmitConstant(fixedArgument)))
+			var closureKey = DelegateRegistry.RegisterClosure(fixedArguments);
+			try
 			{
-#if TRACE
-				ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method=\"{1}\"");
-				ilGenerator.EmitLdcI4(closureKey);
-				ilGenerator.Emit(OpCodes.Box, typeof(int));
-				ilGenerator.Emit(OpCodes.Call, GetCurrentMethodMethod);
-				ilGenerator.Emit(OpCodes.Call, MethodBaseToDebugStringMethod);
-				ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
-				ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
-#endif
-
-				// Emit the code that loads the fixed arguments from ClosureMethod.ClosuresField into a local variable.
-				fixedArgumentsVar = ilGenerator.DeclareLocal(typeof(IRefList<object>));
-				ilGenerator.Emit(OpCodes.Ldsfld, methodBuilder.GetDelegateClosuresField());
-				ilGenerator.EmitLdcI4(closureKey);
-				ilGenerator.Emit(OpCodes.Call, ListOfIRefListOfObjectItemGetMethod);
-				ilGenerator.Emit(OpCodes.Dup);
-				var foundClosureLabel = ilGenerator.DefineLabel();
-				ilGenerator.Emit(OpCodes.Brtrue_S, foundClosureLabel);
-				ilGenerator.Emit(OpCodes.Ldstr, "Unexpectedly did not find closure object for closureKey={0} inside method=\"{1}\"");
-				ilGenerator.EmitLdcI4(closureKey);
-				ilGenerator.Emit(OpCodes.Box, typeof(int));
-				ilGenerator.Emit(OpCodes.Call, GetCurrentMethodMethod);
-				ilGenerator.Emit(OpCodes.Call, MethodBaseToDebugStringMethod);
-				ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
-				ilGenerator.Emit(OpCodes.Newobj, InvalidOperationExceptionConstructor);
-				ilGenerator.Emit(OpCodes.Throw);
-				ilGenerator.MarkLabel(foundClosureLabel);
-				ilGenerator.EmitStloc(fixedArgumentsVar);
-
-#if TRACE
-				ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method: closure=\"{1}\"");
-				ilGenerator.EmitLdcI4(closureKey);
-				ilGenerator.Emit(OpCodes.Box, typeof(int));
-				ilGenerator.EmitLdloc(fixedArgumentsVar);
-				ilGenerator.Emit(OpCodes.Call, typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(object) }));
-				ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
-				ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
-#endif
-			}
-
-			// We'll be using a call opcode if the method is either (a) static, OR (b) instance AND the method is non-overrideable.
-			// This latter (b) case includes the situation where the method's declaring type is a value type (since the method would be implicitly sealed),
-			// and fixedThisArgument (which must be of a value type) must be unboxed into an address for the call opcode.
-			// Otherwise, we'll be using a callvirt opcode. If fixedThisArgument is a value type, then the method's declaring type is either
-			// Object/ValueType/Enum or an interface, and fixedThisArgument needs to be boxed.
-			var useCallOpcode = isStatic || !method.IsVirtual || method.IsFinal;
-
-			// For instance methods, emit the first item in the closure array, which represents the fixedThisArgument.
-			if (!isStatic)
-			{
-				if (fixedThisArgument is null)
+				var methodBuilder = (ClosureMethodGenerateDebugDll ?
+					(IDynamicMethodBuilderFactory)new DebugDynamicMethodBuilder.Factory() : new DynamicMethodBuilder.Factory()).Create(
+					method.Name + "_Closure_" + closureKey,
+					// Some (all?) .NET implementations only accept the following MethodAttributes/CallingConventions for DynamicMethod.
+					MethodAttributes.Public | MethodAttributes.Static,
+					CallingConventions.Standard,
+					declaringType,
+					returnType,
+					nonFixedParameterTypes);
+				for (int index = 0; index < nonFixedArgumentCount; index++)
 				{
-					// If fixedThisArgument is null, fixedArgumentsVar can be null (implying closure isn't needed), so just ldnull.
-					ilGenerator.Emit(OpCodes.Ldnull);
+					var parameter = parameters[fixedArgumentCount - prefixArgumentCount + index];
+					// DefineParameter(0,...) refers to the return value, so for actual parameters, it's practically 1-based rather than 0-based.
+					methodBuilder.DefineParameter(index + 1, parameter.Attributes, parameter.Name);
+					// XXX: Do any custom attributes like ParamArrayAttribute need to be copied too?
+					// There's no good generic way to copy attributes as far as I can tell, since CustomAttributeBuilder is very cumbersome to use.
 				}
-				else
+				var ilGenerator = methodBuilder.GetILGenerator();
+
+				// Create the non-constant fixed arguments that are stored in the closure, and loaded within the dynamic method if needed.
+				var fixedArgumentsVar = default(LocalBuilder);
+				if (fixedArguments.Any(fixedArgument => !ilGenerator.CanEmitConstant(fixedArgument)))
 				{
+#if TRACE
+					ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method=\"{1}\"");
+					ilGenerator.EmitLdcI4(closureKey);
+					ilGenerator.Emit(OpCodes.Box, typeof(int));
+					ilGenerator.Emit(OpCodes.Call, GetCurrentMethodMethod);
+					ilGenerator.Emit(OpCodes.Call, MethodBaseToDebugStringMethod);
+					ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
+					ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
+#endif
+
+					// Emit the code that loads the fixed arguments from ClosureMethod.ClosuresField into a local variable.
+					fixedArgumentsVar = ilGenerator.DeclareLocal(typeof(IRefList<object>));
+					ilGenerator.Emit(OpCodes.Ldsfld, methodBuilder.GetDelegateClosuresField());
+					ilGenerator.EmitLdcI4(closureKey);
+					ilGenerator.Emit(OpCodes.Call, ListOfIRefListOfObjectItemGetMethod);
+					ilGenerator.Emit(OpCodes.Dup);
+					var foundClosureLabel = ilGenerator.DefineLabel();
+					ilGenerator.Emit(OpCodes.Brtrue_S, foundClosureLabel);
+					ilGenerator.Emit(OpCodes.Ldstr, "Unexpectedly did not find closure object for closureKey={0} inside method=\"{1}\"");
+					ilGenerator.EmitLdcI4(closureKey);
+					ilGenerator.Emit(OpCodes.Box, typeof(int));
+					ilGenerator.Emit(OpCodes.Call, GetCurrentMethodMethod);
+					ilGenerator.Emit(OpCodes.Call, MethodBaseToDebugStringMethod);
+					ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
+					ilGenerator.Emit(OpCodes.Newobj, InvalidOperationExceptionConstructor);
+					ilGenerator.Emit(OpCodes.Throw);
+					ilGenerator.MarkLabel(foundClosureLabel);
+					ilGenerator.EmitStloc(fixedArgumentsVar);
+
+#if TRACE
+					ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: closureKey={0} inside method: closure=\"{1}\"");
+					ilGenerator.EmitLdcI4(closureKey);
+					ilGenerator.Emit(OpCodes.Box, typeof(int));
 					ilGenerator.EmitLdloc(fixedArgumentsVar);
-					ilGenerator.EmitLdcI4(0);
-					ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
-					if (useCallOpcode)
+					ilGenerator.Emit(OpCodes.Call, typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(object) }));
+					ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
+					ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));
+#endif
+				}
+
+				// We'll be using a call opcode if the method is either (a) static, OR (b) instance AND the method is non-overrideable.
+				// This latter (b) case includes the situation where the method's declaring type is a value type (since the method would be implicitly sealed),
+				// and fixedThisArgument (which must be of a value type) must be unboxed into an address for the call opcode.
+				// Otherwise, we'll be using a callvirt opcode. If fixedThisArgument is a value type, then the method's declaring type is either
+				// Object/ValueType/Enum or an interface, and fixedThisArgument needs to be boxed.
+				var useCallOpcode = isStatic || !method.IsVirtual || method.IsFinal;
+
+				// For instance methods, emit the first item in the closure array, which represents the fixedThisArgument.
+				if (!isStatic)
+				{
+					if (fixedThisArgument is null)
 					{
-						if (declaringType.IsValueType)
-							ilGenerator.Emit(OpCodes.Unbox, declaringType);
+						// If fixedThisArgument is null, fixedArgumentsVar can be null (implying closure isn't needed), so just ldnull.
+						ilGenerator.Emit(OpCodes.Ldnull);
 					}
 					else
 					{
-						// If declaringType is a value type, fixedThisArgument needs to be boxed.
-						// Fortunately, since it's in the closures array, it's already boxed, so we don't need to do anything extra.
-					}
-				}
-			}
-
-			// Emit fixed arguments, some that can be hard-coded in as constants, others needing the closure array.
-			for (var index = prefixArgumentCount; index < fixedArgumentCount; index++)
-			{
-				var fixedArgument = fixedArguments[index];
-				var fixedArgumentType = parameters[index - prefixArgumentCount].ParameterType;
-				var fixedArgumentIsByRef = fixedArgumentType.IsByRef;
-				if (fixedArgumentIsByRef || !ilGenerator.TryEmitConstant(fixedArgument))
-				{
-					// Need the closure at this point to obtain the fixed arguments.
-					ilGenerator.EmitLdloc(fixedArgumentsVar);
-					ilGenerator.EmitLdcI4(index);
-					if (fixedArgumentIsByRef)
-					{
-						fixedArgumentType = fixedArgumentType.GetElementType();
-						if (fixedArgumentType.IsValueType)
+						ilGenerator.EmitLdloc(fixedArgumentsVar);
+						ilGenerator.EmitLdcI4(0);
+						ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
+						if (useCallOpcode)
 						{
-							// This is the IRefList equivalent of the ldelem.ref instruction.
-							ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
-							// We have a boxed value, and we need a managed pointer to the value contained within the boxed value object.
-							ilGenerator.Emit(OpCodes.Unbox, fixedArgumentType);
+							if (declaringType.IsValueType)
+								ilGenerator.Emit(OpCodes.Unbox, declaringType);
 						}
 						else
 						{
-							// This is the IRefList equivalent of the ldelema instruction.
-							ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectGetItemRefMethod);
+							// If declaringType is a value type, fixedThisArgument needs to be boxed.
+							// Fortunately, since it's in the closures array, it's already boxed, so we don't need to do anything extra.
 						}
 					}
-					else
+				}
+
+				// Emit fixed arguments, some that can be hard-coded in as constants, others needing the closure array.
+				for (var index = prefixArgumentCount; index < fixedArgumentCount; index++)
+				{
+					var fixedArgument = fixedArguments[index];
+					var fixedArgumentType = parameters[index - prefixArgumentCount].ParameterType;
+					var fixedArgumentIsByRef = fixedArgumentType.IsByRef;
+					if (fixedArgumentIsByRef || !ilGenerator.TryEmitConstant(fixedArgument))
 					{
-						// This is the IRefList equivalent of the ldelem.ref instruction.
-						ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
-						// If value type, we have a boxed value, so unbox it.
-						if (fixedArgumentType.IsValueType)
-							ilGenerator.Emit(OpCodes.Unbox_Any, fixedArgumentType);
+						// Need the closure at this point to obtain the fixed arguments.
+						ilGenerator.EmitLdloc(fixedArgumentsVar);
+						ilGenerator.EmitLdcI4(index);
+						if (fixedArgumentIsByRef)
+						{
+							fixedArgumentType = fixedArgumentType.GetElementType();
+							if (fixedArgumentType.IsValueType)
+							{
+								// This is the IRefList equivalent of the ldelem.ref instruction.
+								ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
+								// We have a boxed value, and we need a managed pointer to the value contained within the boxed value object.
+								ilGenerator.Emit(OpCodes.Unbox, fixedArgumentType);
+							}
+							else
+							{
+								// This is the IRefList equivalent of the ldelema instruction.
+								ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectGetItemRefMethod);
+							}
+						}
+						else
+						{
+							// This is the IRefList equivalent of the ldelem.ref instruction.
+							ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
+							// If value type, we have a boxed value, so unbox it.
+							if (fixedArgumentType.IsValueType)
+								ilGenerator.Emit(OpCodes.Unbox_Any, fixedArgumentType);
+						}
 					}
 				}
-			}
 
-			// Emit non-fixed arguments that will be passed via delegate invocation.
-			for (var index = (short)0; index < nonFixedArgumentCount; index++)
+				// Emit non-fixed arguments that will be passed via delegate invocation.
+				for (var index = (short)0; index < nonFixedArgumentCount; index++)
+				{
+					ilGenerator.EmitLdarg(index);
+				}
+
+				// Emit call to the original method, using all the arguments pushed to the CIL stack above.
+				ilGenerator.Emit(useCallOpcode ? OpCodes.Call : OpCodes.Callvirt, method);
+
+				// Emit return. Note that if returning a value type, boxing the return value isn't needed
+				// since the method return type would be a value type in this case (rather than object).
+				ilGenerator.Emit(OpCodes.Ret);
+
+				var closureDelegate = methodBuilder.CreateDelegate(delegateType);
+				DelegateRegistry.RegisterDelegate(closureKey, closureDelegate);
+				return closureDelegate;
+			}
+			catch (Exception ex)
 			{
-				ilGenerator.EmitLdarg(index);
+				// If anything went wrong, deregister the closure, then rethrow the exception.
+				DelegateRegistry.Deregister(closureKey);
+				throw ex;
 			}
-
-			// Emit call to the original method, using all the arguments pushed to the CIL stack above.
-			ilGenerator.Emit(useCallOpcode ? OpCodes.Call : OpCodes.Callvirt, method);
-
-			// Emit return. Note that if returning a value type, boxing the return value isn't needed
-			// since the method return type would be a value type in this case (rather than object).
-			ilGenerator.Emit(OpCodes.Ret);
-
-			var closureDelegate = methodBuilder.CreateDelegate(delegateType);
-			DelegateRegistry.Register(closureKey, fixedArguments, closureDelegate);
-			return closureDelegate;
 		}
 
 		interface IDynamicMethodBuilderFactory

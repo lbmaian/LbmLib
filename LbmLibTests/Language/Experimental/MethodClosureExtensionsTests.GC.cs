@@ -79,6 +79,7 @@ namespace LbmLib.Language.Experimental.Tests
 				try
 				{
 					Assert.AreEqual(0, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
+					Assert.AreEqual(0, ClosureMethod.DelegateRegistry.MinimumFreeClosureKey);
 				}
 				catch (Exception ex)
 				{

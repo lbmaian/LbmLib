@@ -9,7 +9,7 @@ namespace LbmLib.Language.Experimental
 	public static class MethodClosureExtensions
 	{
 #if NET35
-		// Polyfill for .NET Framework 3.5
+		// Polyfill of MethodInfo.CreateDelegate for .NET Framework 3.5 with support for ClosureMethod.
 		public static Delegate CreateDelegate(this MethodInfo method, Type delegateType)
 		{
 			switch (method)
@@ -23,7 +23,7 @@ namespace LbmLib.Language.Experimental
 			}
 		}
 
-		// Polyfill for .NET Framework 3.5
+		// Polyfill of MethodInfo.CreateDelegate for .NET Framework 3.5 with support for ClosureMethod.
 		public static Delegate CreateDelegate(this MethodInfo method, Type delegateType, object target)
 		{
 			switch (method)
