@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using NUnit.Framework;
 
 namespace LbmLib.Language.Experimental.Tests
@@ -31,14 +29,8 @@ namespace LbmLib.Language.Experimental.Tests
 	}
 
 	[TestFixture]
-	public class MethodClosureExtensionsTestsZeroParams
+	public class MethodClosureExtensionsTestsZeroParams : MethodClosureExtensionsBase
 	{
-		[OneTimeSetUp]
-		public static void SetUpOnce()
-		{
-			Logging.DefaultLogger = Logging.ConsoleLogger;
-		}
-
 		public static void ZeroParamsStaticVoidMethod()
 		{
 			Logging.Log("ZeroParamsStaticVoidMethod");
@@ -53,8 +45,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void PartialApply_ZeroParamsStaticVoidMethod([Values] bool additionalEmptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var method = typeof(MethodClosureExtensionsTestsZeroParams).GetMethod(nameof(ZeroParamsStaticVoidMethod));
 				method = method.PartialApply();
@@ -69,20 +60,19 @@ namespace LbmLib.Language.Experimental.Tests
 
 				var @delegate = method.CreateDelegate<Action>();
 				@delegate();
+
+				fixture.ExpectedLogs = new[]
+				{
+					"ZeroParamsStaticVoidMethod",
+					"ZeroParamsStaticVoidMethod",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"ZeroParamsStaticVoidMethod",
-				"ZeroParamsStaticVoidMethod",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void PartialApply_ZeroParamsStaticNonVoidMethod([Values] bool additionalEmptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var method = typeof(MethodClosureExtensionsTestsZeroParams).GetMethod(nameof(ZeroParamsStaticNonVoidMethod));
 				method = method.PartialApply();
@@ -98,20 +88,19 @@ namespace LbmLib.Language.Experimental.Tests
 				var @delegate = method.CreateDelegate<Func<double>>();
 				returnValue = @delegate();
 				Assert.AreEqual(Math.PI, returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"ZeroParamsStaticNonVoidMethod",
+					"ZeroParamsStaticNonVoidMethod",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"ZeroParamsStaticNonVoidMethod",
-				"ZeroParamsStaticNonVoidMethod",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void PartialApply_ZeroParamsInstanceNonVoidMethod([Values] bool additionalEmptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var v = new TestStruct(7);
 				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.ZeroParamsInstanceNonVoidMethod));
@@ -128,20 +117,19 @@ namespace LbmLib.Language.Experimental.Tests
 				var @delegate = method.CreateDelegate<Func<TestStruct>>(v);
 				returnValue = @delegate();
 				Assert.AreEqual(v, returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"ZeroParamsInstanceNonVoidMethod: 7",
+					"ZeroParamsInstanceNonVoidMethod: 7",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"ZeroParamsInstanceNonVoidMethod: 7",
-				"ZeroParamsInstanceNonVoidMethod: 7",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void PartialApply_ZeroParamsVirtualInstanceNonVoidMethod([Values] bool additionalEmptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var c = new TestClassZeroParams(9);
 				var method = typeof(TestClassZeroParams).GetMethod(nameof(TestClassZeroParams.ZeroParamsVirtualInstanceNonVoidMethod));
@@ -158,19 +146,18 @@ namespace LbmLib.Language.Experimental.Tests
 				var @delegate = method.CreateDelegate<Func<TestClass>>(c);
 				returnValue = @delegate();
 				Assert.AreSame(c, returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"ZeroParamsVirtualInstanceNonVoidMethod: 9",
+					"ZeroParamsVirtualInstanceNonVoidMethod: 9",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"ZeroParamsVirtualInstanceNonVoidMethod: 9",
-				"ZeroParamsVirtualInstanceNonVoidMethod: 9",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		public void Bind_ZeroParamsInstanceNonVoidMethod([Values] bool emptyPartialApplyBefore, [Values] bool emptyPartialApplyAfter)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var v = new TestStruct(11);
 				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.ZeroParamsInstanceNonVoidMethod));
@@ -189,20 +176,19 @@ namespace LbmLib.Language.Experimental.Tests
 				var @delegate = method.CreateDelegate<Func<TestStruct>>();
 				returnValue = @delegate();
 				Assert.AreEqual(v, returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"ZeroParamsInstanceNonVoidMethod: 11",
+					"ZeroParamsInstanceNonVoidMethod: 11",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"ZeroParamsInstanceNonVoidMethod: 11",
-				"ZeroParamsInstanceNonVoidMethod: 11",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void Bind_ZeroParamsVirtualInstanceNonVoidMethod([Values] bool emptyPartialApplyBefore, [Values] bool emptyPartialApplyAfter)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var c = new TestClassZeroParams(13);
 				var method = typeof(TestClassZeroParams).GetMethod(nameof(TestClassZeroParams.ZeroParamsVirtualInstanceNonVoidMethod));
@@ -221,13 +207,13 @@ namespace LbmLib.Language.Experimental.Tests
 				var @delegate = method.CreateDelegate<Func<TestClass>>();
 				returnValue = @delegate();
 				Assert.AreSame(c, returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"ZeroParamsVirtualInstanceNonVoidMethod: 13",
+					"ZeroParamsVirtualInstanceNonVoidMethod: 13",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"ZeroParamsVirtualInstanceNonVoidMethod: 13",
-				"ZeroParamsVirtualInstanceNonVoidMethod: 13",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 	}
 }

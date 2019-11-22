@@ -6,31 +6,21 @@ using NUnit.Framework;
 namespace LbmLib.Language.Experimental.Tests
 {
 	[TestFixture]
-	public class MethodClosureExtensionsTestsGC
+	public class MethodClosureExtensionsTestsGC : MethodClosureExtensionsBase
 	{
-		[OneTimeSetUp]
-		public static void SetUpOnce()
-		{
-			Logging.DefaultLogger = Logging.ConsoleLogger;
-		}
-
 		[Test]
+		[NonParallelizable]
 		public void ClosureMethod_DelegateRegistry_GC()
 		{
-			TryFullGCFinalization();
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
-				// Note: Even null-ing out a variable that holds the only reference to an object doesn't actually allow the object to be
+				AssertEmptyDelegateRegistryAfterTryFullGCFinalization("after initial GC");
+				// Note: It seems that even null-ing out a variable that holds the only reference to an object doesn't necessarily allow the object to be
 				// finalizable until after the method ends, so putting all the logic that stores delegates into variables into another method.
 				ClosureMethod_DelegateRegistry_GC_Internal();
-				//Logging.Log("DEBUG before final GC:\n" + ClosureMethod.DelegateRegistry);
-				Assert.AreEqual(1, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
-				TryFullGCFinalization();
-				//Logging.Log("DEBUG after final GC:\n" + ClosureMethod.DelegateRegistry);
-				Assert.AreEqual(0, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
+				AssertDelegateRegistryCount("before final GC", 1);
+				// MethodClosureExtensionsFixture's Dispose will call AssertEmptyDelegateRegistryAfterTryFullGCFinalization, so don't need to call it here.
 			}
-			//Logging.Log(actualLogs.Join("\n"));
 		}
 
 		void ClosureMethod_DelegateRegistry_GC_Internal()
@@ -43,17 +33,28 @@ namespace LbmLib.Language.Experimental.Tests
 				partialAppliedDelegate = partialAppliedMethod.CreateDelegate<MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod_PartialApply_Delegate>();
 				if (i % 5 == 0)
 				{
-					//Logging.Log($"DEBUG before {i} GC:\n" + ClosureMethod.DelegateRegistry);
-					Assert.AreEqual(i == 5 ? 5 : 6, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
+					AssertDelegateRegistryCount($"before {i} GC", i == 5 ? 5 : 6);
 					TryFullGCFinalization();
-					//Logging.Log($"DEBUG after {i} GC:\n" + ClosureMethod.DelegateRegistry);
-					Assert.AreEqual(1, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
+					AssertDelegateRegistryCount($"after {i} GC", 1);
 				}
 			}
 			// Test that the latest partially applied method delegate still works.
 			var x = 20;
 			partialAppliedDelegate(null, new List<string>() { "qwerty" }, 40L, ref x);
 			Assert.AreEqual(20 * 20, x);
+		}
+
+		static void AssertDelegateRegistryCount(string logLabel, int expectedCount)
+		{
+			try
+			{
+				Assert.AreEqual(expectedCount, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
+			}
+			catch (Exception ex)
+			{
+				Logging.Log($"DEBUG {logLabel}:\n{ClosureMethod.DelegateRegistry}");
+				throw ex;
+			}
 		}
 
 		static void TryFullGCFinalization()
@@ -67,5 +68,26 @@ namespace LbmLib.Language.Experimental.Tests
 			// Garbage collect just-finalized objects.
 			GC.Collect();
 		}
+
+		// This is also called in the MethodClosureExtensionsTests.Base TearDown, and if tests are run in parallel, this needs to be thread-safe;
+		// hence, the locking here.
+		internal static void AssertEmptyDelegateRegistryAfterTryFullGCFinalization(string logLabel)
+		{
+			lock (lockObj)
+			{
+				TryFullGCFinalization();
+				try
+				{
+					Assert.AreEqual(0, ClosureMethod.DelegateRegistry.Closures.Where(closure => !(closure is null)).Count());
+				}
+				catch (Exception ex)
+				{
+					Logging.Log($"DEBUG {logLabel}:\n{ClosureMethod.DelegateRegistry}");
+					throw ex;
+				}
+			}
+		}
+
+		static readonly object lockObj = new object();
 	}
 }

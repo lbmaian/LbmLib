@@ -4,7 +4,10 @@ namespace LbmLib.Language
 {
 	public static class Logging
 	{
-		public static readonly Action<string> ConsoleLogger = str => Console.WriteLine(str);
+		// TODO: Change to ConsoleOutLogger.
+		public static readonly Action<string> ConsoleLogger = str => Console.Out.WriteLine(str);
+
+		public static readonly Action<string> ConsoleErrorLogger = str => Console.Error.WriteLine(str);
 
 		public static readonly Action<string> NullLogger = str => { };
 
@@ -19,6 +22,7 @@ namespace LbmLib.Language
 
 		public static string MultiLineLabelDelimiter = ":\n\t";
 
+		// TODO: Make this thread-safe somehow.
 		sealed class WithObject : IDisposable
 		{
 			readonly Action<string> origLogger;

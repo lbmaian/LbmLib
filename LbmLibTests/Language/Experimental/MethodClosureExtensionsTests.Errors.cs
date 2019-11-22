@@ -5,14 +5,8 @@ using NUnit.Framework;
 namespace LbmLib.Language.Experimental.Tests
 {
 	[TestFixture]
-	public class MethodClosureExtensionsTestsErrors
+	public class MethodClosureExtensionsTestsErrors : MethodClosureExtensionsBase
 	{
-		[OneTimeSetUp]
-		public static void SetUpOnce()
-		{
-			Logging.DefaultLogger = Logging.ConsoleLogger;
-		}
-
 		[Test]
 		public void Control_StaticMethod_Error()
 		{

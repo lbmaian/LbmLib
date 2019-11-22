@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using NUnit.Framework;
 
 namespace LbmLib.Language.Experimental.Tests
@@ -41,14 +39,8 @@ namespace LbmLib.Language.Experimental.Tests
 	}
 
 	[TestFixture]
-	public class MethodClosureExtensionsTestsSimple
+	public class MethodClosureExtensionsTestsSimple : MethodClosureExtensionsBase
 	{
-		[OneTimeSetUp]
-		public static void SetUpOnce()
-		{
-			Logging.DefaultLogger = Logging.ConsoleLogger;
-		}
-
 		public static void SimpleStaticVoidMethod(string s, int y, long l, int x)
 		{
 			Logging.Log(s, "s");
@@ -66,8 +58,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void Control_SimpleStaticVoidMethod([Values] bool emptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				SimpleStaticVoidMethod("mystring", 2, 4L, 100);
 
@@ -85,30 +76,29 @@ namespace LbmLib.Language.Experimental.Tests
 
 				var @delegate = method.CreateDelegate<Action<string, int, long, int>>();
 				@delegate("mystring", 2, 4L, 100);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"s: mystring",
+					"y: 2",
+					"l: 4",
+					"x: 100",
+					"s: mystring",
+					"y: 2",
+					"l: 4",
+					"x: 100",
+					"s: mystring",
+					"y: 2",
+					"l: 4",
+					"x: 100",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"s: mystring",
-				"y: 2",
-				"l: 4",
-				"x: 100",
-				"s: mystring",
-				"y: 2",
-				"l: 4",
-				"x: 100",
-				"s: mystring",
-				"y: 2",
-				"l: 4",
-				"x: 100",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void PartialApply_SimpleStaticVoidMethod()
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(SimpleStaticVoidMethod));
 				var fixedArguments = new object[] { "hello world", 20 };
@@ -120,26 +110,25 @@ namespace LbmLib.Language.Experimental.Tests
 
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Action<long, int>>();
 				partialAppliedDelegate(30L, 10);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"s: hello world",
+					"y: 20",
+					"l: 40",
+					"x: 20",
+					"s: hello world",
+					"y: 20",
+					"l: 30",
+					"x: 10",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"s: hello world",
-				"y: 20",
-				"l: 40",
-				"x: 20",
-				"s: hello world",
-				"y: 20",
-				"l: 30",
-				"x: 10",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void Control_SimpleStaticNonVoidMethod([Values] bool emptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var returnValue = SimpleStaticNonVoidMethod("mystring", 2, 4L, 100);
 				Assert.AreEqual("asdf", returnValue);
@@ -163,34 +152,33 @@ namespace LbmLib.Language.Experimental.Tests
 				var @delegate = method.CreateDelegate<Func<string, int, long, int, string>>();
 				returnValue = @delegate("mystring", 2, 4L, 100);
 				Assert.AreEqual("asdf", returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"s: mystring",
+					"y: 2",
+					"l: 4",
+					"x: 100",
+					"s: mystring",
+					"y: 2",
+					"l: 4",
+					"x: 100",
+					"s: mystring",
+					"y: 2",
+					"l: 4",
+					"x: 100",
+					"s: mystring",
+					"y: 2",
+					"l: 4",
+					"x: 100",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"s: mystring",
-				"y: 2",
-				"l: 4",
-				"x: 100",
-				"s: mystring",
-				"y: 2",
-				"l: 4",
-				"x: 100",
-				"s: mystring",
-				"y: 2",
-				"l: 4",
-				"x: 100",
-				"s: mystring",
-				"y: 2",
-				"l: 4",
-				"x: 100",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void PartialApply_SimpleStaticNonVoidMethod()
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(SimpleStaticNonVoidMethod));
 				var fixedArguments = new object[] { "hello world", 1, 2L };
@@ -207,30 +195,29 @@ namespace LbmLib.Language.Experimental.Tests
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<int, string>>();
 				returnValue = partialAppliedDelegate(7);
 				Assert.AreEqual("asdf", returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"s: hello world",
+					"y: 1",
+					"l: 2",
+					"x: 3",
+					"s: hello world",
+					"y: 1",
+					"l: 2",
+					"x: 5",
+					"s: hello world",
+					"y: 1",
+					"l: 2",
+					"x: 7",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"s: hello world",
-				"y: 1",
-				"l: 2",
-				"x: 3",
-				"s: hello world",
-				"y: 1",
-				"l: 2",
-				"x: 5",
-				"s: hello world",
-				"y: 1",
-				"l: 2",
-				"x: 7",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void Control_SimpleInstanceVoidMethod([Values] bool emptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var v = new TestStruct(-15);
 				v.SimpleInstanceVoidMethod(-5, "home", "alone");
@@ -249,20 +236,20 @@ namespace LbmLib.Language.Experimental.Tests
 
 				var closureDelegate = method.CreateDelegate<Action<int, string[]>>(v);
 				closureDelegate(-5, new[] { "home", "alone" });
+
+				fixture.ExpectedLogs = new[]
+				{
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		delegate void SimpleInstanceVoidMethod_PartialApply_Delegate(params string[] ss);
@@ -270,8 +257,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void PartialApply_SimpleInstanceVoidMethod()
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var v = new TestStruct(15);
 				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
@@ -284,24 +270,23 @@ namespace LbmLib.Language.Experimental.Tests
 
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(v);
 				partialAppliedDelegate("hi", "there");
+
+				fixture.ExpectedLogs = new[]
+				{
+					"x: 15",
+					"y: 5",
+					"ss: string[] { hello, world }",
+					"x: 15",
+					"y: 5",
+					"ss: string[] { hi, there }",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"x: 15",
-				"y: 5",
-				"ss: string[] { hello, world }",
-				"x: 15",
-				"y: 5",
-				"ss: string[] { hi, there }",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void Control_SimpleInstanceNonVoidMethod([Values] bool emptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var c = new TestClassSimple(-15);
 				var returnValue = c.SimpleInstanceNonVoidMethod(-5, "home", "alone");
@@ -322,27 +307,26 @@ namespace LbmLib.Language.Experimental.Tests
 				var closureDelegate = method.CreateDelegate<Func<int, string[], string>>(c);
 				returnValue = closureDelegate(-5, new[] { "home", "alone" });
 				Assert.AreEqual("ghkj", returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void PartialApply_SimpleInstanceNonVoidMethod()
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var c = new TestClassSimple(15);
 				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleInstanceNonVoidMethod));
@@ -357,24 +341,23 @@ namespace LbmLib.Language.Experimental.Tests
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<string[], string>>(c);
 				returnValue = partialAppliedDelegate(new string[] { "hi", "there" });
 				Assert.AreEqual("ghkj", returnValue);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"x: 15",
+					"y: 5",
+					"ss: string[] { hello, world }",
+					"x: 15",
+					"y: 5",
+					"ss: string[] { hi, there }",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"x: 15",
-				"y: 5",
-				"ss: string[] { hello, world }",
-				"x: 15",
-				"y: 5",
-				"ss: string[] { hi, there }",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void Control_SimpleVirtualInstanceVoidMethod([Values] bool emptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var c = new TestClassSimple(-15);
 				c.SimpleVirtualInstanceVoidMethod(-5, "home", "alone");
@@ -393,27 +376,26 @@ namespace LbmLib.Language.Experimental.Tests
 
 				var closureDelegate = method.CreateDelegate<Action<int, string[]>>(c);
 				closureDelegate(-5, new[] { "home", "alone" });
+
+				fixture.ExpectedLogs = new[]
+				{
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+					"x: -15",
+					"y: -5",
+					"ss: string[] { home, alone }",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-				"x: -15",
-				"y: -5",
-				"ss: string[] { home, alone }",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		[Test]
 		public void PartialApply_SimpleVirtualInstanceVoidMethod()
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var c = new TestClassSimple(15);
 				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
@@ -427,17 +409,17 @@ namespace LbmLib.Language.Experimental.Tests
 
 				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(c);
 				partialAppliedDelegate("hi", "there");
+
+				fixture.ExpectedLogs = new[]
+				{
+					"x: 15",
+					"y: 5",
+					"ss: string[] { hello, world }",
+					"x: 15",
+					"y: 5",
+					"ss: string[] { hi, there }",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"x: 15",
-				"y: 5",
-				"ss: string[] { hello, world }",
-				"x: 15",
-				"y: 5",
-				"ss: string[] { hi, there }",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		// TODO: Test PartialApply with fixed arguments for all parameters.

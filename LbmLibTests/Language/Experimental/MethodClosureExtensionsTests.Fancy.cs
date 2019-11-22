@@ -56,14 +56,8 @@ namespace LbmLib.Language.Experimental.Tests
 	}
 
 	[TestFixture]
-	public class MethodClosureExtensionsTestsFancy
+	public class MethodClosureExtensionsTestsFancy : MethodClosureExtensionsBase
 	{
-		[OneTimeSetUp]
-		public static void SetUpOnce()
-		{
-			Logging.DefaultLogger = Logging.ConsoleLogger;
-		}
-
 		public static void FancyStaticVoidMethod(string s1, ref string s2, TestStruct v1, ref TestStruct v2, int y1, in int y2, TestClass c1, in TestClass c2,
 			TestClass @null, List<string> slist, long l, ref int x)
 		{
@@ -114,8 +108,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[TestCase(InvocationType.Delegate, true)]
 		public void Control_FancyStaticVoidMethod(InvocationType invocationType, bool emptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(FancyStaticVoidMethod));
 				if (emptyPartialApply)
@@ -158,23 +151,23 @@ namespace LbmLib.Language.Experimental.Tests
 				Assert.AreEqual(new TestClass(4), c1);
 				Assert.AreEqual(new[] { "asdf", "mystring" }, slist);
 				Assert.AreEqual(100 * 100, x);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"s1: mystring",
+					"s2: start",
+					"v1.X: 1",
+					"v2.X: -1",
+					"y1: 2",
+					"y2: 4",
+					"c1.X: 3",
+					"c2.X: 5",
+					"@null: null",
+					"slist: List<string> { asdf }",
+					"l: 4",
+					"x: 100",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"s1: mystring",
-				"s2: start",
-				"v1.X: 1",
-				"v2.X: -1",
-				"y1: 2",
-				"y2: 4",
-				"c1.X: 3",
-				"c2.X: 5",
-				"@null: null",
-				"slist: List<string> { asdf }",
-				"l: 4",
-				"x: 100",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		delegate void FancyStaticVoidMethod_PartialApply_Delegate(ref int x);
@@ -182,8 +175,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void PartialApply_FancyStaticVoidMethod()
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(FancyStaticVoidMethod));
 				var fixedArguments = new object[] { "hello world", "start", new TestStruct(10), new TestStruct(15), 20, 25, new TestClass(30), new TestClass(35),
@@ -218,35 +210,35 @@ namespace LbmLib.Language.Experimental.Tests
 				expectedFixedArguments[9] = new List<string>() { "qwerty", "hello world", "hello world" };
 				CollectionAssert.AreEqual(expectedFixedArguments, fixedArguments);
 				Assert.AreEqual(30 * 30, x);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"s1: hello world",
+					"s2: start",
+					"v1.X: 10",
+					"v2.X: 15",
+					"y1: 20",
+					"y2: 25",
+					"c1.X: 30",
+					"c2.X: 35",
+					"@null: null",
+					"slist: List<string> { qwerty }",
+					"l: 40",
+					"x: 20",
+					"s1: hello world",
+					"s2: startfancy1",
+					"v1.X: 10",
+					"v2.X: 1234",
+					"y1: 20",
+					"y2: 25",
+					"c1.X: 31",
+					"c2.X: 35",
+					"@null: null",
+					"slist: List<string> { qwerty, hello world }",
+					"l: 40",
+					"x: 30",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"s1: hello world",
-				"s2: start",
-				"v1.X: 10",
-				"v2.X: 15",
-				"y1: 20",
-				"y2: 25",
-				"c1.X: 30",
-				"c2.X: 35",
-				"@null: null",
-				"slist: List<string> { qwerty }",
-				"l: 40",
-				"x: 20",
-				"s1: hello world",
-				"s2: startfancy1",
-				"v1.X: 10",
-				"v2.X: 1234",
-				"y1: 20",
-				"y2: 25",
-				"c1.X: 31",
-				"c2.X: 35",
-				"@null: null",
-				"slist: List<string> { qwerty, hello world }",
-				"l: 40",
-				"x: 30",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		delegate List<string[]> FancyStaticNonVoidMethod_Delegate(string s1, out string s2, TestStruct v1, out TestStruct v2, int y1, ref int y2, TestClass c1, ref TestClass c2,
@@ -259,8 +251,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[TestCase(InvocationType.Delegate, true)]
 		public void Control_FancyStaticNonVoidMethod(InvocationType invocationType, bool emptyPartialApply)
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(FancyStaticNonVoidMethod));
 				if (emptyPartialApply)
@@ -312,23 +303,23 @@ namespace LbmLib.Language.Experimental.Tests
 				Assert.AreEqual(new TestClass(5), c2);
 				Assert.AreEqual(new[] { "asdf", "mystring" }, slist);
 				Assert.AreEqual(100 * 100, x);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"s1: mystring",
+					"s2: fancy2",
+					"v1.X: 1",
+					"v2.X: 4321",
+					"y1: 2",
+					"y2: 4",
+					"c1.X: 3",
+					"c2.X: 5",
+					"@null: null",
+					"slist: List<string> { asdf }",
+					"l: 4",
+					"x: 100",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"s1: mystring",
-				"s2: fancy2",
-				"v1.X: 1",
-				"v2.X: 4321",
-				"y1: 2",
-				"y2: 4",
-				"c1.X: 3",
-				"c2.X: 5",
-				"@null: null",
-				"slist: List<string> { asdf }",
-				"l: 4",
-				"x: 100",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		// Also used in MethodClosureExtensionsTests.GC.
@@ -337,8 +328,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void PartialApply_FancyStaticNonVoidMethod()
 		{
-			var actualLogs = new List<string>();
-			using (Logging.With(log => actualLogs.Add(log)))
+			using (var fixture = new MethodClosureExtensionsFixture())
 			{
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(FancyStaticNonVoidMethod));
 				var fixedArguments = new object[] { "hi world", "start", new TestStruct(10), new TestStruct(15), 20, 25, new TestClass(30), new TestClass(35) };
@@ -374,35 +364,35 @@ namespace LbmLib.Language.Experimental.Tests
 				CollectionAssert.AreEqual(expectedFixedArguments, fixedArguments);
 				CollectionAssert.AreEqual(new List<string>() { "asdf", "hi world" }, slist);
 				Assert.AreEqual(30 * 30, x);
+
+				fixture.ExpectedLogs = new[]
+				{
+					"s1: hi world",
+					"s2: fancy2",
+					"v1.X: 10",
+					"v2.X: 4321",
+					"y1: 20",
+					"y2: 25",
+					"c1.X: 30",
+					"c2.X: 35",
+					"@null: null",
+					"slist: List<string> { uiop }",
+					"l: 40",
+					"x: 20",
+					"s1: hi world",
+					"s2: fancy2",
+					"v1.X: 10",
+					"v2.X: 4321",
+					"y1: 20",
+					"y2: 26",
+					"c1.X: 31",
+					"c2.X: 35",
+					"@null: null",
+					"slist: List<string> { asdf }",
+					"l: 40",
+					"x: 30",
+				};
 			}
-			var expectedLogs = new[]
-			{
-				"s1: hi world",
-				"s2: fancy2",
-				"v1.X: 10",
-				"v2.X: 4321",
-				"y1: 20",
-				"y2: 25",
-				"c1.X: 30",
-				"c2.X: 35",
-				"@null: null",
-				"slist: List<string> { uiop }",
-				"l: 40",
-				"x: 20",
-				"s1: hi world",
-				"s2: fancy2",
-				"v1.X: 10",
-				"v2.X: 4321",
-				"y1: 20",
-				"y2: 26",
-				"c1.X: 31",
-				"c2.X: 35",
-				"@null: null",
-				"slist: List<string> { asdf }",
-				"l: 40",
-				"x: 30",
-			};
-			CollectionAssert.AreEqual(expectedLogs, actualLogs.Where(x => !x.StartsWith("DEBUG")));
 		}
 
 		// TODO: Test PartialApply on void instance method.
