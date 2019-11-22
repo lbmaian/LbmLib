@@ -214,7 +214,7 @@ namespace LbmLib.Language.Experimental
 			var originalParameters = OriginalMethod.GetParameters();
 			return (IsStatic ? "static " : FixedThisArgument is null ? "" : "#" + FixedThisArgument.ToDebugString() + "#.") +
 				ReturnType.ToDebugString(includeNamespace, includeDeclaringType) + " " +
-				(!includeDeclaringType || DeclaringType is null ? "" : DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "::") +
+				(!includeDeclaringType || DeclaringType is null ? "" : DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + ":") +
 				OriginalMethod.Name + "(" + Enumerable.Concat(
 					FixedArguments.Select((argument, index) =>
 						originalParameters[index].ToDebugString(includeNamespace, includeDeclaringType) + ": #" + argument.ToDebugString() + "#"),

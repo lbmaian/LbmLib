@@ -526,7 +526,7 @@ namespace LbmLib.Language
 
 		static string ToDebugStringTypeInternal(Type type, bool includeNamespace, bool includeDeclaringType)
 		{
-			return (!includeDeclaringType || type.DeclaringType is null ? "" : type.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "::") +
+			return (!includeDeclaringType || type.DeclaringType is null ? "" : type.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + ":") +
 				(!includeNamespace || type.Namespace == "System" ? "" : type.Namespace + ".") +
 				(type.Name.StartsWith("<") ? "'" + type.Name + "'" : CSCProvider.CreateEscapedIdentifier(type.Name));
 		}
@@ -549,7 +549,7 @@ namespace LbmLib.Language
 		public static string ToDebugString(this FieldInfo field, bool includeNamespace, bool includeDeclaringType)
 		{
 			return field is null ? "null" : field.FieldType.ToDebugString(includeNamespace, includeDeclaringType) + " " +
-				(includeDeclaringType ? field.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "::" : "") +
+				(includeDeclaringType ? field.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + ":" : "") +
 				CSCProvider.CreateEscapedIdentifier(field.Name);
 		}
 
@@ -564,7 +564,7 @@ namespace LbmLib.Language
 			return method is null ? "null" :
 				(method.IsStatic ? "static " : "") +
 				(method is MethodInfo methodInfo ? methodInfo.ReturnType.ToDebugString(includeNamespace, includeDeclaringType) : "void") + " " +
-				(includeDeclaringType && !(method.DeclaringType is null) ? method.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + "::" : "") +
+				(includeDeclaringType && !(method.DeclaringType is null) ? method.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + ":" : "") +
 				CSCProvider.CreateEscapedIdentifier(method.Name) +
 				"(" + method.GetParameters().Select(parameter => parameter.ToDebugString(includeNamespace, includeDeclaringType)).Join() + ")";
 		}

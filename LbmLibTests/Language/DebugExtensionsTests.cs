@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 
@@ -22,28 +23,55 @@ namespace LbmLib.Language.Tests
 
 		delegate KeyValuePair<K, V> TestMethodSignatureDelegate<K, V>(int[,,][][,] a, in string b, out List<KeyValuePair<K, V>> c, ref double? d, params Dictionary<K, V>[] e);
 
-		// TODO: Split into multiple tests.
-		[Test]
-		public void ToDebugStringTests()
+		[TestCaseSource(nameof(ToDebugStringCases))]
+		public string ToDebugStringTest(object obj)
 		{
-			Assert.AreEqual("true", true.ToDebugString());
-			Assert.AreEqual("false", false.ToDebugString());
-			Assert.AreEqual("null", ((object)null).ToDebugString());
-			Assert.AreEqual("1", 1.ToDebugString());
-			Assert.AreEqual("1.5", 1.5.ToDebugString());
-			Assert.AreEqual("void", typeof(void).ToDebugString());
-			Assert.AreEqual("List<int> { 1, 2, 3, 4 }", new List<int>() { 1, 2, 3, 4 }.ToDebugString());
-			Assert.AreEqual("System.Collections.Generic.Dictionary<string, Func<int?[,,][], object>>",
-				typeof(Dictionary<string, Func<int?[,,][], object>>).ToDebugString());
-			Assert.AreEqual("System.Collections.Generic.KeyValuePair<K, V> LbmLib.Language.Tests.DebugExtensionsTests::TestMethodSignature(" +
-				"int[,,][][,] a, in string b, out System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<K, V>> c, ref double? d, " +
-				"params System.Collections.Generic.Dictionary<K, V>[] e)",
-				GetType().GetMethod(nameof(TestMethodSignature)).ToDebugString());
-			Assert.AreEqual("Func<int, long, string>", typeof(Func<int, long, string>).ToDebugString());
-			Assert.AreEqual("delegate KeyValuePair<float, long> TestMethodSignatureDelegate<float, long>(int[,,][][,] a, in string b, " +
-				"out List<KeyValuePair<float, long>> c, ref double? d, params Dictionary<float, long>[] e)",
-				typeof(TestMethodSignatureDelegate<float, long>).ToDebugString(includeNamespace: false, includeDeclaringType: false));
+			return obj.ToDebugString();
 		}
+
+		[TestCaseSource(nameof(TypeToDebugStringCase))]
+		public string TypeToDebugStringTest(bool includeNamespace, bool includeDeclaringType, object obj)
+		{
+			if (obj is Type type)
+				return type.ToDebugString(includeNamespace, includeDeclaringType);
+			else if (obj is FieldInfo field)
+				return field.ToDebugString(includeNamespace, includeDeclaringType);
+			else if (obj is MethodInfo method)
+				return method.ToDebugString(includeNamespace, includeDeclaringType);
+			else
+				throw new NotSupportedException();
+		}
+
+		static readonly TestCaseData[] NonTypeToDebugStringCases =
+		{
+			new TestCaseData(true).Returns("true"),
+			new TestCaseData(false).Returns("false"),
+			new TestCaseData(null).Returns("null"),
+			new TestCaseData(1).Returns("1"),
+			new TestCaseData(1.5).Returns("1.5"),
+			new TestCaseData(new List<int>() { 1, 2, 3, 4 }).Returns("List<int> { 1, 2, 3, 4 }"),
+		};
+
+		static readonly TestCaseData[] TypeToDebugStringCase =
+		{
+			new TestCaseData(true, true, typeof(void)).Returns("void"),
+			new TestCaseData(true, true, typeof(Dictionary<string, Func<int?[,,][], object>>)).Returns(
+				"System.Collections.Generic.Dictionary<string, Func<int?[,,][], object>>"),
+			new TestCaseData(true, true, typeof(DebugExtensionsTests).GetMethod(nameof(TestMethodSignature))).Returns(
+				"System.Collections.Generic.KeyValuePair<K, V> LbmLib.Language.Tests.DebugExtensionsTests:TestMethodSignature(" +
+				"int[,,][][,] a, in string b, out System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<K, V>> c, ref double? d, " +
+				"params System.Collections.Generic.Dictionary<K, V>[] e)"),
+			new TestCaseData(true, true, typeof(Func<int, long, string>)).Returns("Func<int, long, string>"),
+			new TestCaseData(false, false, typeof(TestMethodSignatureDelegate<float, long>)).Returns(
+				"delegate KeyValuePair<float, long> TestMethodSignatureDelegate<float, long>(int[,,][][,] a, in string b, " +
+				"out List<KeyValuePair<float, long>> c, ref double? d, params Dictionary<float, long>[] e)"),
+		};
+
+		static readonly IEnumerable<TestCaseData> ToDebugStringCases = Enumerable.Concat(
+			NonTypeToDebugStringCases,
+			TypeToDebugStringCase
+				.Where(testCaseData => (bool)testCaseData.Arguments[0] && (bool)testCaseData.Arguments[1]) // includeNamespace && includeDeclaringType
+				.Select(testCaseData => new TestCaseData(testCaseData.Arguments[2]).Returns(testCaseData.ExpectedResult))); // type/field/method
 
 		[Test]
 		public void ToDebugStringTestEnumerable()
