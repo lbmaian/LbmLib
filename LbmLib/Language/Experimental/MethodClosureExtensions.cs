@@ -11,6 +11,7 @@ using System.Runtime.CompilerServices; // for ConditionalWeakTable
 
 namespace LbmLib.Language.Experimental
 {
+	// TODO: Move ClosureMethod into its own file?
 	public sealed partial class ClosureMethod : MethodInfo
 	{
 		const bool ClosureMethodGenerateDebugDll = false;
@@ -321,7 +322,7 @@ namespace LbmLib.Language.Experimental
 #endif
 		public Delegate CreateDelegate(Type delegateType)
 		{
-			if (!IsStatic || !typeof(Delegate).IsAssignableFrom(delegateType) || ContainsGenericParameters)
+			if (!IsStatic || ContainsGenericParameters || !typeof(Delegate).IsAssignableFrom(delegateType))
 				throw new ArgumentException("Cannot bind to the target method because its signature or security transparency is not " +
 					"compatible with that of the delegate type.");
 			return CreateClosureDelegate(delegateType, OriginalMethod, FixedThisArgument, FixedArguments);
@@ -332,12 +333,15 @@ namespace LbmLib.Language.Experimental
 #endif
 		public Delegate CreateDelegate(Type delegateType, object target)
 		{
-			if (target is null)
-				throw new ArgumentNullException(nameof(target));
-			if (IsStatic || !typeof(Delegate).IsAssignableFrom(delegateType) || ContainsGenericParameters)
+			// To match Delegate.CreateDelegate behavior, allow null target.
+			// For static methods, this is valid.
+			// For bound methods (also a static method), FixedThisArgument will be passed for target.
+			// For instance methods, don't throw ArgumentNullException; let delegate invocation throw a TargetInvocationException.
+			if (ContainsGenericParameters || !typeof(Delegate).IsAssignableFrom(delegateType) ||
+				!(target is null || DeclaringType.IsAssignableFrom(target.GetType())))
 				throw new ArgumentException("Cannot bind to the target method because its signature or security transparency is not " +
 					"compatible with that of the delegate type.");
-			return CreateClosureDelegate(delegateType, OriginalMethod, target, FixedArguments);
+			return CreateClosureDelegate(delegateType, OriginalMethod, target ?? FixedThisArgument, FixedArguments);
 		}
 	}
 
@@ -465,7 +469,6 @@ namespace LbmLib.Language.Experimental
 
 		internal static Delegate CreateClosureDelegate(Type delegateType, MethodInfo method, object fixedThisArgument, IRefList<object> fixedArguments)
 		{
-			// Assertion: (method is static AND fixedThisArgument is null) OR (method is instance and fixedThisArgument is non-null).
 			var parameters = method.GetParameters();
 			var fixedArgumentCount = fixedArguments.Count;
 			var nonFixedArgumentCount = parameters.Length - fixedArgumentCount;
@@ -563,18 +566,26 @@ namespace LbmLib.Language.Experimental
 			// For instance methods, emit the first item in the closure array, which represents the fixedThisArgument.
 			if (!isStatic)
 			{
-				ilGenerator.EmitLdloc(fixedArgumentsVar);
-				ilGenerator.EmitLdcI4(0);
-				ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
-				if (useCallOpcode)
+				if (fixedThisArgument is null)
 				{
-					if (declaringType.IsValueType)
-						ilGenerator.Emit(OpCodes.Unbox, declaringType);
+					// If fixedThisArgument is null, fixedArgumentsVar can be null (implying closure isn't needed), so just ldnull.
+					ilGenerator.Emit(OpCodes.Ldnull);
 				}
 				else
 				{
-					// If declaringType is a value type, fixedThisArgument needs to be boxed.
-					// Fortunately, since it's in the closures array, it's already boxed, so we don't need to do anything extra.
+					ilGenerator.EmitLdloc(fixedArgumentsVar);
+					ilGenerator.EmitLdcI4(0);
+					ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
+					if (useCallOpcode)
+					{
+						if (declaringType.IsValueType)
+							ilGenerator.Emit(OpCodes.Unbox, declaringType);
+					}
+					else
+					{
+						// If declaringType is a value type, fixedThisArgument needs to be boxed.
+						// Fortunately, since it's in the closures array, it's already boxed, so we don't need to do anything extra.
+					}
 				}
 			}
 
@@ -689,7 +700,7 @@ namespace LbmLib.Language.Experimental
 			public FieldInfo GetDelegateClosuresField() => DelegateClosuresField;
 		}
 
-		// This is based off Harmony.DynamicTools.CreateSaveableMethod/SaveMethod.
+		// This is based off Harmony's DynamicTools.CreateSaveableMethod/SaveMethod.
 		class DebugDynamicMethodBuilder : IDynamicMethodBuilder
 		{
 			internal class Factory : IDynamicMethodBuilderFactory
@@ -751,7 +762,7 @@ namespace LbmLib.Language.Experimental
 				typeBuilder.CreateType();
 				var fileName = methodBuilder.Name + ".dll";
 				assemblyBuilder.Save(fileName);
-				Logging.Log("Saved dynamically created partial applied method to " + Path.Combine(dirPath, fileName));
+				Logging.Log("DEBUG Saved dynamically created method for ClosureMethod delegate to " + Path.Combine(dirPath, fileName));
 				// A MethodBuilder can't be Invoke'd (nor can its MethodHandle be obtained), so get the concrete method from the just-built type.
 				var method = typeBuilder.GetMethod(methodBuilder.Name, parameterTypes);
 				return Delegate.CreateDelegate(delegateType, method);
