@@ -15,7 +15,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(MethodClosureExtensionsTestsSimple.SimpleStaticNonVoidMethod));
 				AssertStaticMethodErrors(fixture, method,
 					typeof(Func<string, int, long, int, string>),
-					typeof(Func<string, int>),
+					typeof(Func<string, int, string, int, string>),
 					new object[] { "hello world", 1, 2L, 3 },
 					new object[] { "hello world", 1, 2L, "string" });
 			}
@@ -63,7 +63,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
 				AssertInstanceMethodErrors(fixture, v, method,
 					typeof(Action<int, string[]>),
-					typeof(Action<int, string, string>),
+					typeof(Action<int, string>),
 					new object[] { 5, new[] { "hello", "world" } },
 					new object[] { 5, "string" });
 			}
@@ -79,7 +79,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var partialAppliedMethod = method.PartialApply(5);
 				AssertInstanceMethodErrors(fixture, v, partialAppliedMethod,
 					typeof(Action<string[]>),
-					typeof(Action<string, string>),
+					typeof(Action<string>),
 					new object[] { new[] { "hello", "world" } },
 					new object[] { "string" });
 			}
@@ -111,7 +111,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
 				AssertInstanceMethodErrors(fixture, c, method,
 					typeof(Action<int, string[]>),
-					typeof(Action<int, string, string>),
+					typeof(Action<int, string>),
 					new object[] { 5, new[] { "hello", "world" } },
 					new object[] { 5, "string" });
 			}
@@ -127,7 +127,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var partialAppliedMethod = method.PartialApply(5);
 				AssertInstanceMethodErrors(fixture, c, partialAppliedMethod,
 					typeof(Action<string[]>),
-					typeof(Action<string, string>),
+					typeof(Action<string>),
 					new object[] { new[] { "hello", "world" } },
 					new object[] { "string" });
 			}
@@ -191,7 +191,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var boundMethod = method.Bind(v);
 				AssertStaticMethodErrors(fixture, boundMethod,
 					typeof(Action<int, string[]>),
-					typeof(Action<int, string, string>),
+					typeof(Action<int, string>),
 					new object[] { 5, new[] { "hello", "world" } },
 					new object[] { 5, "string" });
 				// Bound method cannot be rebound.
@@ -210,7 +210,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var boundMethod = partialAppliedMethod.Bind(v);
 				AssertStaticMethodErrors(fixture, boundMethod,
 					typeof(Action<string[]>),
-					typeof(Action<string, string>),
+					typeof(Action<string>),
 					new object[] { new[] { "hello", "world" } },
 					new object[] { "string" });
 				// Bound partially applied method cannot be rebound.
@@ -229,7 +229,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var partialAppliedMethod = boundMethod.PartialApply(5);
 				AssertStaticMethodErrors(fixture, partialAppliedMethod,
 					typeof(Action<string[]>),
-					typeof(Action<string, string>),
+					typeof(Action<string>),
 					new object[] { new[] { "hello", "world" } },
 					new object[] { "string" });
 				// Partially applied bound method cannot be rebound.
@@ -251,7 +251,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var boundMethod = method.Bind(c);
 				AssertStaticMethodErrors(fixture, boundMethod,
 					typeof(Action<int, string[]>),
-					typeof(Action<int, string, string>),
+					typeof(Action<int, string>),
 					new object[] { 5, new[] { "hello", "world" } },
 					new object[] { 5, "string" });
 			}
@@ -268,7 +268,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var boundMethod = partialAppliedMethod.Bind(c);
 				AssertStaticMethodErrors(fixture, boundMethod,
 					typeof(Action<string[]>),
-					typeof(Action<string, string>),
+					typeof(Action<string>),
 					new object[] { new[] { "hello", "world" } },
 					new object[] { "string" });
 				// Bound partially applied method cannot be rebound.
@@ -287,7 +287,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var partialAppliedMethod = boundMethod.PartialApply(5);
 				AssertStaticMethodErrors(fixture, partialAppliedMethod,
 					typeof(Action<string[]>),
-					typeof(Action<string, string>),
+					typeof(Action<string>),
 					new object[] { new[] { "hello", "world" } },
 					new object[] { "string" });
 				// Partially applied bound method cannot be rebound.
@@ -322,8 +322,13 @@ namespace LbmLib.Language.Experimental.Tests
 				Assert.Throws(typeof(ArgumentException), () => method.Invoke(null, invalidSampleArgs));
 			}
 			// Static method CreateDelegate cannot be invoked with a non-null target.
-			Assert.Throws(typeof(ArgumentException), () => method.CreateDelegate(validDelegateType, this));
+			// Note: On Mono runtime, TargetParameterCountException will be thrown by MethodInfo.CreateDelegate.
+			// In all other cases (MethodInfo.CreateDelegate on MS .NET runtime, ClosureMethod.CreateDelegate), ArgumentException will be thrown.
+			AssertThrowsOneOfTwoExceptions<ArgumentException, TargetParameterCountException>(() => method.CreateDelegate(validDelegateType, this));
 			// CreateDelegate cannot be invoked with an invalid delegate type.
+			// Note: On Mono runtime, if Action/Func and has wrong # of type parameters, TargetParameterCountException is thrown instead
+			// so just ensure either the Action is passed for Func (or vice versa), or the same # of type parameters are passed,
+			// just with wrong type parameter(s).
 			Assert.Throws(typeof(ArgumentException), () => method.CreateDelegate(invalidDelegateType));
 		}
 
@@ -358,10 +363,31 @@ namespace LbmLib.Language.Experimental.Tests
 			// Instance method CreateDelegate cannot be invoked with an invalid target.
 			Assert.Throws(typeof(ArgumentException), () => method.CreateDelegate(validDelegateType, this));
 			// CreateDelegate cannot be invoked with an invalid delegate type.
+			// Note: On Mono runtime, if Action/Func and has wrong # of type parameters, TargetParameterCountException is thrown instead
+			// so just ensure either the Action is passed for Func (or vice versa), or the same # of type parameters are passed,
+			// just with wrong type parameter(s).
 			Assert.Throws(typeof(ArgumentException), () => method.CreateDelegate(invalidDelegateType, instance));
 			// CreateDelegate(delegateType, null) doesn't throw error, but invocation of the resulting delegate results is invalid.
+			// Note: On Mono runtime, TargetException will be thrown by MethodInfo.CreateDelegate.
+			// In all other cases (MethodInfo.CreateDelegate on MS .NET runtime, ClosureMethod.CreateDelegate), TargetInvocationException will be thrown.
 			var nullBoundDelegate = method.CreateDelegate(validDelegateType, null);
-			Assert.Throws(typeof(TargetInvocationException), () => nullBoundDelegate.DynamicInvoke(validSampleArgs));
+			AssertThrowsOneOfTwoExceptions<TargetInvocationException, TargetException>(() => nullBoundDelegate.DynamicInvoke(validSampleArgs));
+		}
+
+		static void AssertThrowsOneOfTwoExceptions<E1, E2>(TestDelegate testDelegate) where E1 : Exception where E2 : Exception
+		{
+			try
+			{
+				testDelegate();
+				return;
+			}
+			catch (Exception ex)
+			{
+				if (ex is E1 || ex is E2)
+					return;
+				Assert.Throws(typeof(ArgumentException), testDelegate);
+			}
+			Assert.Throws(typeof(ArgumentException), testDelegate);
 		}
 	}
 }

@@ -120,9 +120,17 @@ namespace LbmLib.Language.Experimental.Tests
 				this.childFilter = childFilter;
 			}
 
+			public static bool IsRunningOnMono { get; } = !(Type.GetType("Mono.Runtime") is null);
+
 			public void Dispose()
 			{
-				AssertClosureRegistryCountAfterFullGCFinalization(0, "after test: " + TestContext.CurrentContext.Test.FullName);
+				// As this is called at the end of the test method, any variable (in)directly holding a finalizable object (such as closure owners)
+				// should now have those objects be detected as finalizable. Thus, assert an empty closure registry.
+				// Exception: Mono runtime apparently isn't as aggressive with this detection and still doesn't see such objects as finalizable
+				// until after the method ends, so don't assert an empty closure registry in this case.
+				if (!IsRunningOnMono)
+					AssertClosureRegistryCountAfterFullGCFinalization(0, "after test: " + TestContext.CurrentContext.Test.FullName);
+
 				loggingWithDisposable.Dispose();
 				if (!childFilter)
 				{

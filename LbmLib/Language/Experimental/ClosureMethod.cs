@@ -388,7 +388,11 @@ namespace LbmLib.Language.Experimental
 				// the delegate object can become finalizable right as its being invoked and hands control over to the dynamic method's contained code.
 				// The dynamic method itself doesn't seem to be finalizable during execution of its contained code
 				// (or at least to the point that the fixedArguments are loaded in it).
-				Registry.RegisterClosureOwner(registryKey, dynamicMethod);
+				// Little trick: Using the dynamicMethod.CreateDelegate(delegateType).Method instead of dynamicMethod itself,
+				// since the former is typically the internal "compiled" version of the dynamic method, and thus shouldn't have issues with being used for
+				// reflection purposes (DynamicMethod can sometimes throw NotSupportedException for certain reflection APIs),
+				// which could matter for ClosureRegistry.ToString().
+				Registry.RegisterClosureOwner(registryKey, closureDelegate.Method);
 				return closureDelegate;
 			}
 			catch (Exception ex)
