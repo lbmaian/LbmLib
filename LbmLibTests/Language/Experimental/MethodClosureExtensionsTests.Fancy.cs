@@ -131,8 +131,7 @@ namespace LbmLib.Language.Experimental.Tests
 				}
 				else if (invocationType == InvocationType.Delegate)
 				{
-					var @delegate = method.CreateDelegate<FancyStaticVoidMethod_Delegate>();
-					@delegate("mystring", ref s, v1, ref v2, 2, 4, c1, new TestClass(5), null, slist, 4L, ref x);
+					method.CreateDelegate<FancyStaticVoidMethod_Delegate>()("mystring", ref s, v1, ref v2, 2, 4, c1, new TestClass(5), null, slist, 4L, ref x);
 				}
 				else // if (invocationType == InvocationType.Invoke)
 				{
@@ -202,9 +201,8 @@ namespace LbmLib.Language.Experimental.Tests
 				var expectedNonFixedArguments = new object[] { 20 * 20 };
 				CollectionAssert.AreEqual(expectedNonFixedArguments, nonFixedArguments);
 
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<FancyStaticVoidMethod_PartialApply_Delegate>();
 				var x = 30;
-				partialAppliedDelegate(ref x);
+				partialAppliedMethod.CreateDelegate<FancyStaticVoidMethod_PartialApply_Delegate>()(ref x);
 				expectedFixedArguments[1] = "startfancy1fancy1";
 				expectedFixedArguments[6] = new TestClass(32);
 				expectedFixedArguments[9] = new List<string>() { "qwerty", "hello world", "hello world" };
@@ -277,8 +275,7 @@ namespace LbmLib.Language.Experimental.Tests
 				}
 				else if (invocationType == InvocationType.Delegate)
 				{
-					var @delegate = method.CreateDelegate<FancyStaticNonVoidMethod_Delegate>();
-					returnValue = @delegate("mystring", out s, v1, out v2, 2, ref y, c1, ref c2, null, slist, 4L, ref x);
+					returnValue = method.CreateDelegate<FancyStaticNonVoidMethod_Delegate>()("mystring", out s, v1, out v2, 2, ref y, c1, ref c2, null, slist, 4L, ref x);
 				}
 				else // if (invocationType == InvocationType.Invoke)
 				{
@@ -353,10 +350,9 @@ namespace LbmLib.Language.Experimental.Tests
 				var expectedNonFixedArguments = new object[] { null, new List<string>() { "uiop", "hi world" }, 40L, 20 * 20 };
 				CollectionAssert.AreEqual(expectedNonFixedArguments, nonFixedArguments);
 
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<FancyStaticNonVoidMethod_PartialApply_Delegate>();
 				var slist = new List<string>() { "asdf" };
 				var x = 30;
-				returnValue = partialAppliedDelegate(null, slist, 40L, ref x);
+				returnValue = partialAppliedMethod.CreateDelegate<FancyStaticNonVoidMethod_PartialApply_Delegate>()(null, slist, 40L, ref x);
 				expectedReturnValue = new List<string[]>() { new[] { "asdfa", "asdfb", "asdfc" }, new[] { "hi worlda", "hi worldb", "hi worldc" } };
 				Assert.AreEqual(expectedReturnValue, returnValue);
 				expectedFixedArguments[5] = 27;

@@ -58,8 +58,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = method.Invoke(null, new object[0]);
 				Assert.IsNull(returnValue);
 
-				var @delegate = method.CreateDelegate<Action>();
-				@delegate();
+				method.CreateDelegate<Action>()();
 
 				fixture.ExpectedLogs = new[]
 				{
@@ -85,8 +84,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = (double)method.Invoke(null, new object[0]);
 				Assert.AreEqual(Math.PI, returnValue);
 
-				var @delegate = method.CreateDelegate<Func<double>>();
-				returnValue = @delegate();
+				returnValue = method.CreateDelegate<Func<double>>()();
 				Assert.AreEqual(Math.PI, returnValue);
 
 				fixture.ExpectedLogs = new[]
@@ -114,8 +112,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = (TestStruct)method.Invoke(v, new object[0]);
 				Assert.AreEqual(v, returnValue);
 
-				var @delegate = method.CreateDelegate<Func<TestStruct>>(v);
-				returnValue = @delegate();
+				returnValue = method.CreateDelegate<Func<TestStruct>>(v)();
 				Assert.AreEqual(v, returnValue);
 
 				fixture.ExpectedLogs = new[]
@@ -143,8 +140,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = method.Invoke(c, new object[0]) as TestClass;
 				Assert.AreSame(c, returnValue);
 
-				var @delegate = method.CreateDelegate<Func<TestClass>>(c);
-				returnValue = @delegate();
+				returnValue = method.CreateDelegate<Func<TestClass>>(c)();
 				Assert.AreSame(c, returnValue);
 
 				fixture.ExpectedLogs = new[]
@@ -173,8 +169,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = (TestStruct)method.Invoke(null, new object[0]);
 				Assert.AreEqual(v, returnValue);
 
-				var @delegate = method.CreateDelegate<Func<TestStruct>>();
-				returnValue = @delegate();
+				returnValue = method.CreateDelegate<Func<TestStruct>>()();
 				Assert.AreEqual(v, returnValue);
 
 				fixture.ExpectedLogs = new[]
@@ -204,8 +199,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = method.Invoke(null, new object[0]) as TestClass;
 				Assert.AreSame(c, returnValue);
 
-				var @delegate = method.CreateDelegate<Func<TestClass>>();
-				returnValue = @delegate();
+				returnValue = method.CreateDelegate<Func<TestClass>>()();
 				Assert.AreSame(c, returnValue);
 
 				fixture.ExpectedLogs = new[]

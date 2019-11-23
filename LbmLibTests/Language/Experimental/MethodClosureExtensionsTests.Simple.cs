@@ -74,8 +74,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = method.Invoke(null, new object[] { "mystring", 2, 4L, 100 });
 				Assert.IsNull(returnValue);
 
-				var @delegate = method.CreateDelegate<Action<string, int, long, int>>();
-				@delegate("mystring", 2, 4L, 100);
+				method.CreateDelegate<Action<string, int, long, int>>()("mystring", 2, 4L, 100);
 
 				fixture.ExpectedLogs = new[]
 				{
@@ -108,8 +107,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = partialAppliedMethod.Invoke(null, new object[] { 40L, 20 });
 				Assert.IsNull(returnValue);
 
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Action<long, int>>();
-				partialAppliedDelegate(30L, 10);
+				partialAppliedMethod.CreateDelegate<Action<long, int>>()(30L, 10);
 
 				fixture.ExpectedLogs = new[]
 				{
@@ -149,8 +147,7 @@ namespace LbmLib.Language.Experimental.Tests
 				returnValue = method.Invoke(this, new object[] { "mystring", 2, 4L, 100 }) as string;
 				Assert.AreEqual("asdf", returnValue);
 
-				var @delegate = method.CreateDelegate<Func<string, int, long, int, string>>();
-				returnValue = @delegate("mystring", 2, 4L, 100);
+				returnValue = method.CreateDelegate<Func<string, int, long, int, string>>()("mystring", 2, 4L, 100);
 				Assert.AreEqual("asdf", returnValue);
 
 				fixture.ExpectedLogs = new[]
@@ -192,8 +189,7 @@ namespace LbmLib.Language.Experimental.Tests
 				returnValue = partialAppliedMethod.Invoke(this, new object[] { 5 });
 				Assert.AreEqual("asdf", returnValue);
 
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<int, string>>();
-				returnValue = partialAppliedDelegate(7);
+				returnValue = partialAppliedMethod.CreateDelegate<Func<int, string>>()(7);
 				Assert.AreEqual("asdf", returnValue);
 
 				fixture.ExpectedLogs = new[]
@@ -234,8 +230,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = method.Invoke(v, new object[] { -5, new[] { "home", "alone" } });
 				Assert.IsNull(returnValue);
 
-				var closureDelegate = method.CreateDelegate<Action<int, string[]>>(v);
-				closureDelegate(-5, new[] { "home", "alone" });
+				method.CreateDelegate<Action<int, string[]>>(v)(-5, new[] { "home", "alone" });
 
 				fixture.ExpectedLogs = new[]
 				{
@@ -268,8 +263,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = partialAppliedMethod.Invoke(v, new object[] { new string[] { "hello", "world" } });
 				Assert.IsNull(returnValue);
 
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(v);
-				partialAppliedDelegate("hi", "there");
+				partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(v)("hi", "there");
 
 				fixture.ExpectedLogs = new[]
 				{
@@ -304,8 +298,7 @@ namespace LbmLib.Language.Experimental.Tests
 				returnValue = method.Invoke(c, new object[] { -5, new[] { "home", "alone" } }) as string;
 				Assert.AreEqual("ghkj", returnValue);
 
-				var closureDelegate = method.CreateDelegate<Func<int, string[], string>>(c);
-				returnValue = closureDelegate(-5, new[] { "home", "alone" });
+				returnValue = method.CreateDelegate<Func<int, string[], string>>(c)(-5, new[] { "home", "alone" });
 				Assert.AreEqual("ghkj", returnValue);
 
 				fixture.ExpectedLogs = new[]
@@ -338,8 +331,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = partialAppliedMethod.Invoke(c, new object[] { new string[] { "hello", "world" } }) as string;
 				Assert.AreEqual("ghkj", returnValue);
 
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<Func<string[], string>>(c);
-				returnValue = partialAppliedDelegate(new string[] { "hi", "there" });
+				returnValue = partialAppliedMethod.CreateDelegate<Func<string[], string>>(c)(new string[] { "hi", "there" });
 				Assert.AreEqual("ghkj", returnValue);
 
 				fixture.ExpectedLogs = new[]
@@ -374,8 +366,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = method.Invoke(c, new object[] { -5, new[] { "home", "alone" } });
 				Assert.IsNull(returnValue);
 
-				var closureDelegate = method.CreateDelegate<Action<int, string[]>>(c);
-				closureDelegate(-5, new[] { "home", "alone" });
+				method.CreateDelegate<Action<int, string[]>>(c)(-5, new[] { "home", "alone" });
 
 				fixture.ExpectedLogs = new[]
 				{
@@ -407,8 +398,7 @@ namespace LbmLib.Language.Experimental.Tests
 				var returnValue = partialAppliedMethod.Invoke(c, new object[] { new string[] { "hello", "world" } });
 				Assert.IsNull(returnValue);
 
-				var partialAppliedDelegate = partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(c);
-				partialAppliedDelegate("hi", "there");
+				partialAppliedMethod.CreateDelegate<SimpleInstanceVoidMethod_PartialApply_Delegate>(c)("hi", "there");
 
 				fixture.ExpectedLogs = new[]
 				{

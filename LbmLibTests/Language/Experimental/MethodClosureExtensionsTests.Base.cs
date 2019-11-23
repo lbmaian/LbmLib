@@ -90,29 +90,98 @@ namespace LbmLib.Language.Experimental.Tests
 		// Tests will use the following pattern:
 		// using (var fixture = new MethodClosureExtensionsFixture())
 		// {
-		//     // code that includes Logging.Log(...)
+		//     // code that (in)directly includes Logging.Log(...)
 		//     fixture.ExpectedLogs = ...;
 		// }
-		protected sealed class MethodClosureExtensionsFixture : IDisposable
+		public sealed class MethodClosureExtensionsFixture : IDisposable
 		{
 			public readonly List<string> ActualLogs;
 			public IEnumerable<string> ExpectedLogs;
 
-			readonly IDisposable loggingWith;
+			readonly IDisposable loggingWithDisposable;
+			readonly bool childFilter;
 
 			public MethodClosureExtensionsFixture()
 			{
 				ActualLogs = new List<string>();
-				loggingWith = Logging.With(log => ActualLogs.Add(log));
+				loggingWithDisposable = Logging.With(log =>
+				{
+					// Synchronization is necessary since finalizers can log and they run in a different thread.
+					lock (ActualLogs)
+						ActualLogs.Add(log);
+				});
+				childFilter = false;
+			}
+
+			MethodClosureExtensionsFixture(List<string> actualLogs, IDisposable loggingWithDisposable, bool childFilter)
+			{
+				ActualLogs = actualLogs;
+				this.loggingWithDisposable = loggingWithDisposable;
+				this.childFilter = childFilter;
 			}
 
 			public void Dispose()
 			{
-				MethodClosureExtensionsTestsGC.AssertEmptyDelegateRegistryAfterTryFullGCFinalization("after test: " + TestContext.CurrentContext.Test.FullName);
-				loggingWith.Dispose();
-				Logging.Log(ActualLogs.Join("\n\t"), "ActualLogs");
-				if (!(ExpectedLogs is null))
-					CollectionAssert.AreEqual(ExpectedLogs, ActualLogs.Where(x => !x.StartsWith("DEBUG")));
+				AssertClosureRegistryCountAfterFullGCFinalization(0, "after test: " + TestContext.CurrentContext.Test.FullName);
+				loggingWithDisposable.Dispose();
+				if (!childFilter)
+				{
+					lock (ActualLogs)
+					{
+						Logging.Log(ActualLogs.Join("\n\t"), "ActualLogs");
+						if (!(ExpectedLogs is null))
+							CollectionAssert.AreEqual(ExpectedLogs, ActualLogs.Where(log => !log.StartsWith("DEBUG")));
+					}
+				}
+			}
+
+			public MethodClosureExtensionsFixture DebugOnlyFilter()
+			{
+				return new MethodClosureExtensionsFixture(ActualLogs,
+					Logging.With(log =>
+					{
+						if (log.StartsWith("DEBUG"))
+						{
+							lock (ActualLogs)
+								ActualLogs.Add(log);
+						}
+					}),
+					childFilter: true);
+			}
+
+			readonly object gcLockObj = new object();
+
+			public void AssertClosureRegistryCountAfterFullGCFinalization(int expectedCount, string logLabel = null)
+			{
+				// If tests are run in parallel, this needs to be thread-safe; hence, the locking here.
+				lock (gcLockObj)
+				{
+					// Doing a couple full GC iterations, since finalizers themselves create objects that need finalization,
+					// which in turn can be GC'ed and need finalizing themselves, and so forth.
+					// This isn't fool-proof and is probably overkill, but it should suffice for testing purposes.
+					for (var gcIter = 0; gcIter < 3; gcIter++)
+					{
+						// Garbage collect any finalized objects and identify finalizable objects.
+						GC.Collect(generation: 2);
+						// Finalize found finalizable objects.
+						GC.WaitForPendingFinalizers();
+					}
+
+					try
+					{
+						Assert.AreEqual(expectedCount, ClosureMethod.Registry.FixedArgumentsRegistry.Where(closure => !(closure is null)).Count(),
+							logLabel + " ClosureCount");
+						if (expectedCount == 0)
+							Assert.AreEqual(0, ClosureMethod.Registry.MinimumFreeRegistryKey,
+								logLabel + " MinimumFreeRegistryKey");
+						//Logging.Log($"DEBUG {logLabel}:\n{ClosureMethod.Registry}");
+					}
+					catch (Exception ex)
+					{
+						Logging.Log($"DEBUG {logLabel}:\n{ClosureMethod.Registry}");
+						throw ex;
+					}
+				}
 			}
 		}
 	}
