@@ -93,7 +93,7 @@ namespace LbmLib.Language.Experimental.Tests
 		//     // code that (in)directly includes Logging.Log(...)
 		//     fixture.ExpectedLogs = ...;
 		// }
-		public sealed class MethodClosureExtensionsFixture : IDisposable
+		protected sealed class MethodClosureExtensionsFixture : IDisposable
 		{
 			public readonly List<string> ActualLogs;
 			public IEnumerable<string> ExpectedLogs;
@@ -157,28 +157,32 @@ namespace LbmLib.Language.Experimental.Tests
 					childFilter: true);
 			}
 
-			readonly object gcLockObj = new object();
+			public readonly object GCSync = new object();
 
-			public void AssertClosureRegistryCountAfterFullGCFinalization(int expectedCount, string logLabel = null)
+			static void TryFullGCFinalization()
+			{
+				// Doing a couple full GC iterations, since finalizers themselves create objects that need finalization,
+				// which in turn can be GC'ed and need finalizing themselves, and so forth.
+				// This isn't fool-proof and is probably overkill, but it should suffice for testing purposes.
+				for (var gcIter = 0; gcIter < 3; gcIter++)
+				{
+					// Garbage collect any finalized objects and identify finalizable objects.
+					GC.Collect(generation: 2);
+					// Finalize found finalizable objects.
+					GC.WaitForPendingFinalizers();
+				}
+			}
+
+			public void AssertClosureRegistryCountAfterFullGCFinalization(int expectedCount, string logLabel)
 			{
 				// If tests are run in parallel, this needs to be thread-safe; hence, the locking here.
-				lock (gcLockObj)
+				lock (GCSync)
 				{
-					// Doing a couple full GC iterations, since finalizers themselves create objects that need finalization,
-					// which in turn can be GC'ed and need finalizing themselves, and so forth.
-					// This isn't fool-proof and is probably overkill, but it should suffice for testing purposes.
-					for (var gcIter = 0; gcIter < 3; gcIter++)
-					{
-						// Garbage collect any finalized objects and identify finalizable objects.
-						GC.Collect(generation: 2);
-						// Finalize found finalizable objects.
-						GC.WaitForPendingFinalizers();
-					}
-
+					TryFullGCFinalization();
 					try
 					{
 						Assert.AreEqual(expectedCount, ClosureMethod.Registry.FixedArgumentsRegistry.Where(closure => !(closure is null)).Count(),
-							logLabel + " ClosureCount");
+							logLabel + ": ClosureCount");
 						if (expectedCount == 0)
 							Assert.AreEqual(0, ClosureMethod.Registry.MinimumFreeRegistryKey,
 								logLabel + " MinimumFreeRegistryKey");

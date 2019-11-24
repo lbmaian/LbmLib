@@ -35,7 +35,7 @@ namespace LbmLib.Language.Experimental.Tests
 		}
 
 		public KeyValuePair<Type, string> FancyInstanceNonVoidMethod(Type t, float x, ref int y, out Dictionary<Type, string> dict,
-			in List<int> il, Func<TestClass, int, string> func, int z, string s)
+			in IList<int> il, Func<TestClass, int, string> func, int z, string s)
 		{
 			Logging.Log(X, "X");
 			X++;
@@ -59,7 +59,7 @@ namespace LbmLib.Language.Experimental.Tests
 	public class MethodClosureExtensionsTestsFancy : MethodClosureExtensionsBase
 	{
 		public static void FancyStaticVoidMethod(string s1, ref string s2, TestStruct v1, ref TestStruct v2, int y1, in int y2, TestClass c1, in TestClass c2,
-			TestClass @null, List<string> slist, long l, ref int x)
+			TestClass @null, IList<string> slist, long l, ref int x)
 		{
 			Logging.Log(s1, "s1");
 			Logging.Log(s2, "s2");
@@ -82,7 +82,7 @@ namespace LbmLib.Language.Experimental.Tests
 		}
 
 		public static List<string[]> FancyStaticNonVoidMethod(string s1, out string s2, TestStruct v1, out TestStruct v2, int y1, ref int y2, TestClass c1, ref TestClass c2,
-			TestClass @null, List<string> slist, long l, ref int x)
+			TestClass @null, IList<string> slist, long l, ref int x)
 		{
 			s2 = "fancy2";
 			v2 = new TestStruct(4321);
@@ -99,7 +99,7 @@ namespace LbmLib.Language.Experimental.Tests
 		}
 
 		delegate void FancyStaticVoidMethod_Delegate(string s1, ref string s2, TestStruct v1, ref TestStruct v2, int y1, in int y2, TestClass c1, in TestClass c2,
-			TestClass @null, List<string> slist, long l, ref int x);
+			TestClass @null, IList<string> slist, long l, ref int x);
 
 		[TestCase(InvocationType.DirectCall, false)]
 		[TestCase(InvocationType.Invoke, false)]
@@ -186,7 +186,7 @@ namespace LbmLib.Language.Experimental.Tests
 				Assert.AreEqual("static void FancyStaticVoidMethod" +
 					"(string s1: #hello world#, ref string s2: #start#, TestStruct v1: #TestStruct{10}#, ref TestStruct v2: #TestStruct{15}#, int y1: #20#, in int y2: #25#, " +
 					"TestClass c1: #TestClass{30}#, in TestClass c2: #TestClass{35}#, TestClass @null: #null#, " +
-					"List<string> slist: #List<string> { qwerty }#, long l: #40#, ref int x)",
+					"IList<string> slist: #List<string> { qwerty }#, long l: #40#, ref int x)",
 					partialAppliedMethod.ToDebugString(false, false));
 				Assert.IsNull(partialAppliedMethod.FixedThisArgument);
 				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
@@ -240,7 +240,7 @@ namespace LbmLib.Language.Experimental.Tests
 		}
 
 		delegate List<string[]> FancyStaticNonVoidMethod_Delegate(string s1, out string s2, TestStruct v1, out TestStruct v2, int y1, ref int y2, TestClass c1, ref TestClass c2,
-			TestClass @null, List<string> slist, long l, ref int x);
+			TestClass @null, IList<string> slist, long l, ref int x);
 
 		[TestCase(InvocationType.DirectCall, false)]
 		[TestCase(InvocationType.Invoke, false)]
@@ -320,7 +320,7 @@ namespace LbmLib.Language.Experimental.Tests
 		}
 
 		// Also used in MethodClosureExtensionsTests.GC.
-		internal delegate List<string[]> FancyStaticNonVoidMethod_PartialApply_Delegate(TestClass @null, List<string> sl, long l, ref int x);
+		internal delegate List<string[]> FancyStaticNonVoidMethod_PartialApply_Delegate(TestClass @null, IList<string> sl, long l, ref int x);
 
 		[Test]
 		public void PartialApply_FancyStaticNonVoidMethod()
@@ -331,11 +331,11 @@ namespace LbmLib.Language.Experimental.Tests
 				var fixedArguments = new object[] { "hi world", "start", new TestStruct(10), new TestStruct(15), 20, 25, new TestClass(30), new TestClass(35) };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
 				Assert.AreEqual("List`1 FancyStaticNonVoidMethod_unbound_hiworld_start_TestStruct10_TestStruct15_20_25_TestClass30_TestClass35" +
-					"(LbmLib.Language.Experimental.Tests.TestClass null, System.Collections.Generic.List`1[System.String] slist, Int64 l, Int32& x)",
+					"(LbmLib.Language.Experimental.Tests.TestClass null, System.Collections.Generic.IList`1[System.String] slist, Int64 l, Int32& x)",
 					partialAppliedMethod.ToString());
 				Assert.AreEqual("static List<string[]> FancyStaticNonVoidMethod" +
 					"(string s1: #hi world#, out string s2: #start#, TestStruct v1: #TestStruct{10}#, out TestStruct v2: #TestStruct{15}#, int y1: #20#, ref int y2: #25#, " +
-					"TestClass c1: #TestClass{30}#, ref TestClass c2: #TestClass{35}#, TestClass @null, List<string> slist, long l, ref int x)",
+					"TestClass c1: #TestClass{30}#, ref TestClass c2: #TestClass{35}#, TestClass @null, IList<string> slist, long l, ref int x)",
 					partialAppliedMethod.ToDebugString(false, false));
 				Assert.IsNull(partialAppliedMethod.FixedThisArgument);
 				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
