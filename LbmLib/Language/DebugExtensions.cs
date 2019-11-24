@@ -71,10 +71,8 @@ namespace LbmLib.Language
 			return new ConcurrentSet<Assembly>(assemblyBlacklist);
 		}
 
-		static string AssemblyProductValue(this Assembly assembly)
-		{
-			return ((AssemblyProductAttribute)assembly.GetCustomAttributes(typeof(AssemblyProductAttribute), false).FirstOrDefault())?.Product ?? "";
-		}
+		static string AssemblyProductValue(this Assembly assembly) =>
+			((AssemblyProductAttribute)assembly.GetCustomAttributes(typeof(AssemblyProductAttribute), false).FirstOrDefault())?.Product ?? "";
 
 		static readonly IDictionary<Type, DynamicDispatchEntry> ToDebugStringDynamicDispatches = InitializeToDebugStringDynamicDispatches();
 
@@ -141,10 +139,7 @@ namespace LbmLib.Language
 			}
 		}
 
-		static bool IsStaticClass(Type type)
-		{
-			return type.IsClass && type.IsAbstract && type.IsSealed;
-		}
+		static bool IsStaticClass(Type type) => type.IsClass && type.IsAbstract && type.IsSealed;
 
 		static readonly DynamicDispatchEntry BaseObjectToStringDynamicDispatchEntry = InitializeBaseObjectToStringDynamicDispatchEntry();
 
@@ -302,60 +297,42 @@ namespace LbmLib.Language
 			}
 		}
 
-		public static string ToDebugString(this string str)
-		{
-			return str;
-		}
+		public static string ToDebugString(this string str) => str;
 
 		// TODO: Combine ToDebugString(IEnumerable) overloads when default arguments are supported.
-		public static string ToDebugString(this IEnumerable enumerable)
-		{
-			return enumerable.ToDebugString(", ");
-		}
+		public static string ToDebugString(this IEnumerable enumerable) => enumerable.Cast<object>().ToDebugString();
 
-		public static string ToDebugString(this IEnumerable enumerable, string delimiter, bool includeEnumerableTypeBraces = true)
-		{
-			if (enumerable is null)
-				return "null";
-			var str = enumerable.NonGenericIEnumerableSelect(item => item.ToDebugString()).Join(delimiter);
-			if (!includeEnumerableTypeBraces)
-				return str;
-			var braceDelimiter = delimiter.Contains('\n') ? delimiter : " ";
-			return enumerable.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " {" + braceDelimiter + str + braceDelimiter + "}";
-		}
-
-		static IEnumerable<T> NonGenericIEnumerableSelect<T>(this IEnumerable enumerable, Func<object, T> selector)
-		{
-			foreach (var item in enumerable)
-				yield return selector(item);
-		}
+		public static string ToDebugString(this IEnumerable enumerable, string delimiter, bool includeEnumerableTypeBraces = true) =>
+			enumerable.Cast<object>().ToDebugString();
 
 		// TODO: Combine ToDebugString<T>(IEnumerable<T>) overloads when default arguments are supported.
-		public static string ToDebugString<T>(this IEnumerable<T> enumerable)
-		{
-			return enumerable.ToDebugString(", ");
-		}
+		public static string ToDebugString<T>(this IEnumerable<T> enumerable) => enumerable.ToDebugString(", ");
 
 		public static string ToDebugString<T>(this IEnumerable<T> enumerable, string delimiter, bool includeEnumerableTypeBraces = true)
 		{
 			if (enumerable is null)
 				return "null";
-			var str = enumerable.Select(item => item.ToDebugString()).Join(delimiter);
+			string str;
+			if (enumerable is ICollection collection && collection.IsSynchronized)
+			{
+				lock (collection.SyncRoot)
+					str = enumerable.Select(item => item.ToDebugString()).Join(delimiter);
+			}
+			else
+			{
+				str = enumerable.Select(item => item.ToDebugString()).Join(delimiter);
+			}
 			if (!includeEnumerableTypeBraces)
 				return str;
 			var braceDelimiter = delimiter.Contains('\n') ? delimiter : " ";
 			return enumerable.GetType().ToDebugString(includeNamespace: false, includeDeclaringType: false) + " {" + braceDelimiter + str + braceDelimiter + "}";
 		}
 
-		public static string ToDebugString(this DictionaryEntry dictionaryEntry)
-		{
-			return dictionaryEntry.Key.ToDebugString() + "=" + dictionaryEntry.Value.ToDebugString();
-		}
+		public static string ToDebugString(this DictionaryEntry dictionaryEntry) =>
+			dictionaryEntry.Key.ToDebugString() + "=" + dictionaryEntry.Value.ToDebugString();
 
-		public static string ToDebugString<K, V>(this KeyValuePair<K, V> keyValuePair)
-		{
-			return keyValuePair.Key.ToDebugString() + "=" + keyValuePair.Value.ToDebugString();
-		}
+		public static string ToDebugString<K, V>(this KeyValuePair<K, V> keyValuePair) =>
+			keyValuePair.Key.ToDebugString() + "=" + keyValuePair.Value.ToDebugString();
 
 #if !NET35
 		public static string ToDebugString<K, V>(this ConditionalWeakTable<K, V> weakTable, string delimiter = ", ", bool includeEnumerableTypeBraces = true)
@@ -460,10 +437,7 @@ namespace LbmLib.Language
 		static readonly CSharpCodeProvider CSCProvider = new CSharpCodeProvider();
 
 		// TODO: Combine ToDebugString(Type) overloads when default arguments are supported.
-		public static string ToDebugString(this Type type)
-		{
-			return ToDebugString(type, includeNamespace: true, includeDeclaringType: true);
-		}
+		public static string ToDebugString(this Type type) => type.ToDebugString(includeNamespace: true, includeDeclaringType: true);
 
 		public static string ToDebugString(this Type type, bool includeNamespace, bool includeDeclaringType)
 		{
@@ -542,10 +516,7 @@ namespace LbmLib.Language
 		}
 
 		// TODO: Combine ToDebugString(FieldInfo) overloads when default arguments are supported.
-		public static string ToDebugString(this FieldInfo field)
-		{
-			return field.ToDebugString(true, true);
-		}
+		public static string ToDebugString(this FieldInfo field) => field.ToDebugString(true, true);
 
 		public static string ToDebugString(this FieldInfo field, bool includeNamespace, bool includeDeclaringType)
 		{
@@ -555,10 +526,7 @@ namespace LbmLib.Language
 		}
 
 		// TODO: Combine ToDebugString(MethodBase) overloads when default arguments are supported.
-		public static string ToDebugString(this MethodBase method)
-		{
-			return method.ToDebugString(true, true);
-		}
+		public static string ToDebugString(this MethodBase method) => method.ToDebugString(true, true);
 
 		public static string ToDebugString(this MethodBase method, bool includeNamespace, bool includeDeclaringType)
 		{
@@ -571,10 +539,7 @@ namespace LbmLib.Language
 		}
 
 		// TODO: Combine ToDebugString(ParameterInfo) overloads when default arguments are supported.
-		public static string ToDebugString(this ParameterInfo parameter)
-		{
-			return parameter.ToDebugString(true, true);
-		}
+		public static string ToDebugString(this ParameterInfo parameter) => parameter.ToDebugString(true, true);
 
 		public static string ToDebugString(this ParameterInfo parameter, bool includeNamespace, bool includeDeclaringType)
 		{

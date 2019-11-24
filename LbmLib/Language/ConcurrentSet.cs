@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-#if !NET35
+#if NET35
+using System.Collections.ObjectModel;
+#else
 using System.Linq;
 using System.Collections.Concurrent;
 #endif
@@ -36,9 +38,29 @@ namespace LbmLib.Language
 			set => ((IDictionary)dictionary)[key] = value;
 		}
 
-		public ICollection<K> Keys => dictionary.Keys;
+		// For parity with .NET Framework 4.0+ ConcurrentDictionary<K, V>, this returns a ReadOnlyCollection copy of the dictionary keys.
+		// This prevents InvalidOperationException when enumerating over the keys while the dictionary is potentially being modified
+		// during enumeration.
+		public ICollection<K> Keys
+		{
+			get
+			{
+				lock (dictionary.SyncRoot)
+					return new ReadOnlyCollection<K>(dictionary.Keys.AsList());
+			}
+		}
 
-		public ICollection<V> Values => dictionary.Values;
+		// For parity with .NET Framework 4.0+ ConcurrentDictionary<K, V>, this returns a ReadOnlyCollection copy of the dictionary values.
+		// This prevents InvalidOperationException when enumerating over the values while the dictionary is potentially being modified
+		// during enumeration.
+		public ICollection<V> Values
+		{
+			get
+			{
+				lock (dictionary.SyncRoot)
+					return new ReadOnlyCollection<V>(dictionary.Values.AsList());
+			}
+		}
 
 		public int Count => dictionary.Count;
 
@@ -100,6 +122,18 @@ namespace LbmLib.Language
 		public bool ContainsKey(K key) => dictionary.ContainsKey(key);
 
 		public void ContainsValue(V value) => dictionary.ContainsValue(value);
+
+		// The .NET 4.0+ ConcurrentDictionary<K, V> allows enumeration while the dictionary is being modified,
+		// where dictionary entries (KeyValuePair<K, V>) are returned on demand via the enumerator,
+		// never throwing InvalidOperationException due to the dictionary being potentially modified during enumeration.
+		// There is no reliable way to replicate this behavior exactly with Dictionary<K, V>, so the next best option is done:
+		// The dictionary entries must be copied immediately within this method (rather than on demand during enumeration),
+		// or else InvalidOperationException is risked (due to the dictionary being potentially modified during enumeration).
+		public IEnumerator<KeyValuePair<K, V>> GetEnumerator()
+		{
+			lock (dictionary.SyncRoot)
+				return new List<KeyValuePair<K, V>>(dictionary).GetEnumerator();
+		}
 
 		public V GetOrAdd(K key, Func<K, V> valueFactory)
 		{
@@ -172,8 +206,6 @@ namespace LbmLib.Language
 				return false;
 			}
 		}
-
-		public IEnumerator<KeyValuePair<K, V>> GetEnumerator() => dictionary.GetEnumerator();
 
 		void IDictionary<K, V>.Add(K key, V value) => dictionary.Add(key, value);
 

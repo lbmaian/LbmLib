@@ -46,10 +46,6 @@ namespace LbmLib.Language.Experimental
 		internal class ClosureRegistry
 		{
 			// This is the actual registry of fixedArguments IRefList (wrapped/chained array), with registryKey being an index into it.
-			// It's an IRefList<object> rather than a custom struct so that other assemblies can more easily access it,
-			// as is required with DebugDynamicMethodBuilder, since other assemblies can only access public types and members
-			// (or else would require expensive reflection within the dynamically-generated method).
-			// DebugDynamicMethodBuilder's built type will have its own field that stores a reference to this object.
 			internal readonly List<IRefList<object>> FixedArgumentsRegistry = new List<IRefList<object>>();
 
 #if NET35
@@ -347,10 +343,11 @@ namespace LbmLib.Language.Experimental
 			return CreateClosureDelegate(delegateType, OriginalMethod, target ?? FixedThisArgument, FixedArguments);
 		}
 
-		// For easy access within the delegate dynamic method. Public for access within DebugDynamicMethodBuilder-created assemblies.
-		public static readonly List<IRefList<object>> FixedArgumentsRegistry = Registry.FixedArgumentsRegistry;
+		// For easy access within the delegate dynamic method.
+		static readonly List<IRefList<object>> FixedArgumentsRegistry = Registry.FixedArgumentsRegistry;
 
-		static readonly FieldInfo FixedArgumentsRegistryField = typeof(ClosureMethod).GetField(nameof(FixedArgumentsRegistry));
+		static readonly FieldInfo FixedArgumentsRegistryField = typeof(ClosureMethod).GetField(nameof(FixedArgumentsRegistry),
+			BindingFlags.Static | BindingFlags.NonPublic);
 		static readonly MethodInfo GetCurrentMethodMethod = typeof(MethodBase).GetMethod(nameof(MethodBase.GetCurrentMethod));
 		static readonly MethodInfo ListOfIRefListOfObjectItemGetMethod = typeof(List<IRefList<object>>).GetProperty("Item").GetGetMethod();
 		static readonly MethodInfo IRefListOfObjectItemGetMethod = typeof(IRefList<object>).GetProperty("Item").GetGetMethod();
@@ -461,10 +458,10 @@ namespace LbmLib.Language.Experimental
 					ilGenerator.Emit(OpCodes.Call, typeof(GC).GetMethod(nameof(GC.WaitForPendingFinalizers), Type.EmptyTypes));
 				}
 #if GENERATE_DEBUG_LOGGING
-				ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: registryKey={0} inside method: FixedArgumentsRegistry={1}");
+				ilGenerator.Emit(OpCodes.Ldstr, "DEBUG CreateClosureDelegate: registryKey={0} inside method:\n{1}");
 				ilGenerator.EmitLdcI4(registryKey);
 				ilGenerator.Emit(OpCodes.Box, typeof(int));
-				ilGenerator.Emit(OpCodes.Ldsfld, FixedArgumentsRegistryField);
+				ilGenerator.Emit(OpCodes.Ldsfld, typeof(ClosureMethod).GetField(nameof(Registry), BindingFlags.Static | BindingFlags.NonPublic));
 				ilGenerator.Emit(OpCodes.Call, typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(object) }));
 				ilGenerator.Emit(OpCodes.Call, StringFormat2Method);
 				ilGenerator.Emit(OpCodes.Call, typeof(Logging).GetMethod(nameof(Logging.StringLog)));

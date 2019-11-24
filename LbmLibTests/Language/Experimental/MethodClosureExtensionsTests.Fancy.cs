@@ -5,8 +5,6 @@ using NUnit.Framework;
 
 namespace LbmLib.Language.Experimental.Tests
 {
-	// Note: Method and structure fixtures are public so that methods dynamically created via DebugDynamicMethodBuilder have access to them.
-
 	// structs have no inheritance, so using partial struct as a workaround.
 	public partial struct TestStruct
 	{
