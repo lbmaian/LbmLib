@@ -2,7 +2,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace LbmLib.Language
@@ -32,15 +31,31 @@ namespace LbmLib.Language
 		}
 #endif
 
-		public static List<T> AsList<T>(this IEnumerable<T> enumerable)
-		{
-			return enumerable as List<T> ?? new List<T>(enumerable);
-		}
+		public static List<T> AsList<T>(this IEnumerable<T> enumerable) =>
+			enumerable as List<T> ?? new List<T>(enumerable);
 
-		public static List<T> AsList<T>(this IEnumerable enumerable)
-		{
-			return enumerable as List<T> ?? new List<T>(enumerable.Cast<T>());
-		}
+		public static List<T> AsList<T>(this IEnumerable enumerable) =>
+			enumerable as List<T> ?? new List<T>(enumerable.Cast<T>());
+
+		public static HashSet<T> AsHashSet<T>(this IEnumerable<T> enumerable) =>
+			enumerable as HashSet<T> ?? new HashSet<T>(enumerable);
+
+		public static HashSet<T> AsHashSet<T>(this IEnumerable enumerable) =>
+			enumerable as HashSet<T> ?? new HashSet<T>(enumerable.Cast<T>());
+
+#if !NET35
+		public static ISet<T> AsSet<T>(this IEnumerable<T> enumerable) =>
+			enumerable as ISet<T> ?? new HashSet<T>(enumerable);
+
+		public static ISet<T> AsSet<T>(this IEnumerable enumerable) =>
+			enumerable as ISet<T> ?? new HashSet<T>(enumerable.Cast<T>());
+#endif
+
+		public static Dictionary<K, V> ToDictionary<K, V>(this IEnumerable<KeyValuePair<K, V>> pairs) =>
+			pairs.ToDictionary(pair => pair.Key, pair => pair.Value);
+
+		public static Dictionary<K, V> AsDictionary<K, V>(this IEnumerable<KeyValuePair<K, V>> pairs) =>
+			pairs as Dictionary<K, V> ?? pairs.ToDictionary(pair => pair.Key, pair => pair.Value);
 
 		// Essentially IList.GetRange(list, 0, count) without needing to check whether index is out of bounds.
 		public static List<T> GetRangeFromStart<T>(this IList<T> list, int count)
@@ -125,6 +140,27 @@ namespace LbmLib.Language
 			if (list.Count == 0)
 				list.Add(defaultSupplier());
 			return list;
+		}
+
+		public static bool TryAdd<K, V>(this IDictionary<K, V> dictionary, K key, V value)
+		{
+			if (dictionary is IDictionary idictionary && idictionary.IsSynchronized)
+			{
+				lock (idictionary.SyncRoot)
+					return TryAddInternal(dictionary, key, value);
+			}
+			else
+			{
+				return TryAddInternal(dictionary, key, value);
+			}
+		}
+
+		static bool TryAddInternal<K, V>(IDictionary<K, V> dictionary, K key, V value)
+		{
+			if (dictionary.ContainsKey(key))
+				return false;
+			dictionary.Add(key, value);
+			return true;
 		}
 
 		public static int RemoveAll<K, V>(this IDictionary<K, V> dictionary, Func<K, bool> keyPredicate = null, Func<V, bool> valuePredicate = null,

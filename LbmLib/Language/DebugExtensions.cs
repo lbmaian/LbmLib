@@ -7,8 +7,8 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.CSharp;
-
 #if !NET35
+using System.Collections.Concurrent;
 using TypeDebugStringKey = System.Tuple<System.Type, bool, bool>;
 #endif
 
@@ -50,9 +50,9 @@ namespace LbmLib.Language
 			}
 		}
 
-		static readonly HashSet<Assembly> ToDebugStringAssemblies = InitializeToDebugStringAssemblies();
+		static readonly ConcurrentSet<Assembly> ToDebugStringAssemblies = InitializeToDebugStringAssemblies();
 
-		static HashSet<Assembly> InitializeToDebugStringAssemblies()
+		static ConcurrentSet<Assembly> InitializeToDebugStringAssemblies()
 		{
 			//Logging.Log(AppDomain.CurrentDomain.GetAssemblies().Select(assembly => $"{assembly}: " + assembly.AssemblyProductValue()).Join("\n\t"), "Assemblies");
 			var assemblyBlacklist = AppDomain.CurrentDomain.GetAssemblies().Where(assembly =>
@@ -68,7 +68,7 @@ namespace LbmLib.Language
 				return false;
 			});
 			//Logging.Log(assemblyBlacklist.Join("\n\t"), "assemblyBlacklist");
-			return new HashSet<Assembly>(assemblyBlacklist);
+			return new ConcurrentSet<Assembly>(assemblyBlacklist);
 		}
 
 		static string AssemblyProductValue(this Assembly assembly)
@@ -76,16 +76,17 @@ namespace LbmLib.Language
 			return ((AssemblyProductAttribute)assembly.GetCustomAttributes(typeof(AssemblyProductAttribute), false).FirstOrDefault())?.Product ?? "";
 		}
 
-		static readonly Dictionary<Type, DynamicDispatchEntry> ToDebugStringDynamicDispatches = InitializeToDebugStringDynamicDispatches();
+		static readonly IDictionary<Type, DynamicDispatchEntry> ToDebugStringDynamicDispatches = InitializeToDebugStringDynamicDispatches();
 
-		static Dictionary<Type, DynamicDispatchEntry> InitializeToDebugStringDynamicDispatches()
+		static IDictionary<Type, DynamicDispatchEntry> InitializeToDebugStringDynamicDispatches()
 		{
-			var toDebugStringDynamicDispatches = new Dictionary<Type, DynamicDispatchEntry>() { { typeof(object), BaseObjectToStringDynamicDispatchEntry } };
+			var toDebugStringDynamicDispatches = new ConcurrentDictionary<Type, DynamicDispatchEntry>();
+			toDebugStringDynamicDispatches[typeof(object)] = BaseObjectToStringDynamicDispatchEntry;
 			InitializeToDebugStringDynamicDispatches(toDebugStringDynamicDispatches, Assembly.GetExecutingAssembly());
 			return toDebugStringDynamicDispatches;
 		}
 
-		static void InitializeToDebugStringDynamicDispatches(Dictionary<Type, DynamicDispatchEntry> toDebugStringDynamicDispatches, Assembly assembly)
+		static void InitializeToDebugStringDynamicDispatches(IDictionary<Type, DynamicDispatchEntry> toDebugStringDynamicDispatches, Assembly assembly)
 		{
 			if (ToDebugStringAssemblies.Contains(assembly))
 				return;
@@ -109,7 +110,7 @@ namespace LbmLib.Language
 									// it'll be constructed within ToDebugString when the full object type with closed generic type arguments are known.
 									var dispatch = new DynamicDispatchEntry(targetType, method, null);
 									//Logging.Log($"Partial init {targetType} dispatch: {dispatch}");
-									toDebugStringDynamicDispatches.Add(targetType, dispatch);
+									toDebugStringDynamicDispatches[targetType] = dispatch;
 								}
 								else
 								{
@@ -119,7 +120,7 @@ namespace LbmLib.Language
 										Expression.Convert(paramExpr, targetType)), paramExpr).Compile();
 									var dispatch = new DynamicDispatchEntry(targetType, method, @delegate);
 									//Logging.Log($"Init {targetType} dispatch: {dispatch}");
-									toDebugStringDynamicDispatches.Add(targetType, dispatch);
+									toDebugStringDynamicDispatches[targetType] = dispatch;
 								}
 							}
 						}
@@ -134,7 +135,7 @@ namespace LbmLib.Language
 						var @delegate = Expression.Lambda<Func<object, string>>(Expression.Call(Expression.Convert(paramExpr, type), method), paramExpr).Compile();
 						var dispatch = new DynamicDispatchEntry(type, method, @delegate);
 						//Logging.Log($"Init {type} dispatch: {dispatch}");
-						toDebugStringDynamicDispatches.Add(type, dispatch);
+						toDebugStringDynamicDispatches[type] = dispatch;
 					}
 				}
 			}
@@ -254,7 +255,7 @@ namespace LbmLib.Language
 			{
 				//Logging.Log($"Cache {objType} dispatch with exception: {exception}");
 			}
-			ToDebugStringDynamicDispatches.Add(objType, foundDispatch);
+			ToDebugStringDynamicDispatches[objType] = foundDispatch;
 			return foundDispatch.Delegate(obj);
 		}
 
@@ -420,9 +421,9 @@ namespace LbmLib.Language
 		}
 #endif
 
-		static readonly Dictionary<TypeDebugStringKey, string> TypeToDebugStringCache = InitializeTypeToDebugStringCache();
+		static readonly IDictionary<TypeDebugStringKey, string> TypeToDebugStringCache = InitializeTypeToDebugStringCache();
 
-		static Dictionary<TypeDebugStringKey, string> InitializeTypeToDebugStringCache()
+		static IDictionary<TypeDebugStringKey, string> InitializeTypeToDebugStringCache()
 		{
 			var primitiveTypeToShortName = new Dictionary<Type, string>()
 			{
@@ -453,7 +454,7 @@ namespace LbmLib.Language
 				typeToDebugStringCache.Add(new TypeDebugStringKey(type, true, false), name);
 				typeToDebugStringCache.Add(new TypeDebugStringKey(type, true, true), name);
 			}
-			return typeToDebugStringCache;
+			return new ConcurrentDictionary<TypeDebugStringKey, string>(typeToDebugStringCache);
 		}
 
 		static readonly CSharpCodeProvider CSCProvider = new CSharpCodeProvider();
@@ -519,7 +520,7 @@ namespace LbmLib.Language
 				{
 					str = ToDebugStringTypeInternal(type, includeNamespace, includeDeclaringType);
 				}
-				TypeToDebugStringCache.Add(typeDebugStringKey, str);
+				TypeToDebugStringCache[typeDebugStringKey] = str;
 			}
 			return str;
 		}
