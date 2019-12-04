@@ -3,6 +3,8 @@ using NUnit.Framework;
 
 namespace LbmLib.Language.Experimental.Tests
 {
+	// TODO: Test methods with optional parameters.
+
 	// structs have no inheritance, so using partial struct as a workaround.
 	public partial struct TestStruct
 	{
@@ -43,7 +45,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void PartialApply_ZeroParamsStaticVoidMethod([Values] bool additionalEmptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsZeroParams).GetMethod(nameof(ZeroParamsStaticVoidMethod));
 				method = method.PartialApply();
@@ -63,13 +65,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"ZeroParamsStaticVoidMethod",
 					"ZeroParamsStaticVoidMethod",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void PartialApply_ZeroParamsStaticNonVoidMethod([Values] bool additionalEmptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsZeroParams).GetMethod(nameof(ZeroParamsStaticNonVoidMethod));
 				method = method.PartialApply();
@@ -90,13 +92,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"ZeroParamsStaticNonVoidMethod",
 					"ZeroParamsStaticNonVoidMethod",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void PartialApply_ZeroParamsInstanceNonVoidMethod([Values] bool additionalEmptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(7);
 				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.ZeroParamsInstanceNonVoidMethod));
@@ -118,13 +120,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"ZeroParamsInstanceNonVoidMethod: 7",
 					"ZeroParamsInstanceNonVoidMethod: 7",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void PartialApply_ZeroParamsVirtualInstanceNonVoidMethod([Values] bool additionalEmptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassZeroParams(9);
 				var method = typeof(TestClassZeroParams).GetMethod(nameof(TestClassZeroParams.ZeroParamsVirtualInstanceNonVoidMethod));
@@ -146,13 +148,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"ZeroParamsVirtualInstanceNonVoidMethod: 9",
 					"ZeroParamsVirtualInstanceNonVoidMethod: 9",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void Bind_ZeroParamsInstanceNonVoidMethod([Values] bool emptyPartialApplyBefore, [Values] bool emptyPartialApplyAfter)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(11);
 				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.ZeroParamsInstanceNonVoidMethod));
@@ -176,13 +178,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"ZeroParamsInstanceNonVoidMethod: 11",
 					"ZeroParamsInstanceNonVoidMethod: 11",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void Bind_ZeroParamsVirtualInstanceNonVoidMethod([Values] bool emptyPartialApplyBefore, [Values] bool emptyPartialApplyAfter)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassZeroParams(13);
 				var method = typeof(TestClassZeroParams).GetMethod(nameof(TestClassZeroParams.ZeroParamsVirtualInstanceNonVoidMethod));
@@ -206,7 +208,9 @@ namespace LbmLib.Language.Experimental.Tests
 					"ZeroParamsVirtualInstanceNonVoidMethod: 13",
 					"ZeroParamsVirtualInstanceNonVoidMethod: 13",
 				};
-			}
+			});
 		}
+
+		// TODO: IsStatic tests.
 	}
 }

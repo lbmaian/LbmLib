@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 
 namespace LbmLib.Language.Experimental.Tests
@@ -106,7 +107,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[TestCase(InvocationType.Delegate, true)]
 		public void Control_FancyStaticVoidMethod(InvocationType invocationType, bool emptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(FancyStaticVoidMethod));
 				if (emptyPartialApply)
@@ -164,7 +165,7 @@ namespace LbmLib.Language.Experimental.Tests
 					"l: 4",
 					"x: 100",
 				};
-			}
+			});
 		}
 
 		delegate void FancyStaticVoidMethod_PartialApply_Delegate(ref int x);
@@ -172,13 +173,13 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void PartialApply_FancyStaticVoidMethod()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(FancyStaticVoidMethod));
 				var fixedArguments = new object[] { "hello world", "start", new TestStruct(10), new TestStruct(15), 20, 25, new TestClass(30), new TestClass(35),
 					null, new List<string>() { "qwerty" }, 40L };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
-				Assert.AreEqual("Void FancyStaticVoidMethod_unbound_helloworld_start_TestStruct10_TestStruct15_20_25_TestClass30_TestClass35_" +
+				Assert.AreEqual("Void FancyStaticVoidMethod_Static_helloworld_start_TestStruct10_TestStruct15_20_25_TestClass30_TestClass35_" +
 					"null_SystemCollectionsGenericList1SystemString_40(Int32& x)",
 					partialAppliedMethod.ToString());
 				Assert.AreEqual("static void FancyStaticVoidMethod" +
@@ -188,7 +189,7 @@ namespace LbmLib.Language.Experimental.Tests
 					partialAppliedMethod.ToDebugString(false, false));
 				Assert.IsNull(partialAppliedMethod.FixedThisArgument);
 				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
-				CollectionAssert.AreEqual(method.GetParameters().CopyToEnd(fixedArguments.Length), partialAppliedMethod.GetParameters());
+				AssertParameterInfosAreEqual(method, partialAppliedMethod);
 
 				var nonFixedArguments = new object[] { 20 };
 				var returnValue = partialAppliedMethod.Invoke(null, nonFixedArguments);
@@ -234,7 +235,7 @@ namespace LbmLib.Language.Experimental.Tests
 					"l: 40",
 					"x: 30",
 				};
-			}
+			});
 		}
 
 		delegate List<string[]> FancyStaticNonVoidMethod_Delegate(string s1, out string s2, TestStruct v1, out TestStruct v2, int y1, ref int y2, TestClass c1, ref TestClass c2,
@@ -247,7 +248,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[TestCase(InvocationType.Delegate, true)]
 		public void Control_FancyStaticNonVoidMethod(InvocationType invocationType, bool emptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(FancyStaticNonVoidMethod));
 				if (emptyPartialApply)
@@ -314,7 +315,7 @@ namespace LbmLib.Language.Experimental.Tests
 					"l: 4",
 					"x: 100",
 				};
-			}
+			});
 		}
 
 		// Also used in MethodClosureExtensionsTests.GC.
@@ -323,12 +324,12 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void PartialApply_FancyStaticNonVoidMethod()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(FancyStaticNonVoidMethod));
 				var fixedArguments = new object[] { "hi world", "start", new TestStruct(10), new TestStruct(15), 20, 25, new TestClass(30), new TestClass(35) };
 				var partialAppliedMethod = method.PartialApply(fixedArguments);
-				Assert.AreEqual("List`1 FancyStaticNonVoidMethod_unbound_hiworld_start_TestStruct10_TestStruct15_20_25_TestClass30_TestClass35" +
+				Assert.AreEqual("List`1 FancyStaticNonVoidMethod_Static_hiworld_start_TestStruct10_TestStruct15_20_25_TestClass30_TestClass35" +
 					"(LbmLib.Language.Experimental.Tests.TestClass null, System.Collections.Generic.IList`1[System.String] slist, Int64 l, Int32& x)",
 					partialAppliedMethod.ToString());
 				Assert.AreEqual("static List<string[]> FancyStaticNonVoidMethod" +
@@ -337,7 +338,7 @@ namespace LbmLib.Language.Experimental.Tests
 					partialAppliedMethod.ToDebugString(false, false));
 				Assert.IsNull(partialAppliedMethod.FixedThisArgument);
 				CollectionAssert.AreEqual(fixedArguments, partialAppliedMethod.FixedArguments);
-				CollectionAssert.AreEqual(method.GetParameters().CopyToEnd(fixedArguments.Length), partialAppliedMethod.GetParameters());
+				AssertParameterInfosAreEqual(method, partialAppliedMethod);
 
 				var nonFixedArguments = new object[] { null, new List<string>() { "uiop" }, 40L, 20 };
 				var returnValue = partialAppliedMethod.Invoke(null, nonFixedArguments) as List<string[]>;
@@ -386,7 +387,7 @@ namespace LbmLib.Language.Experimental.Tests
 					"l: 40",
 					"x: 30",
 				};
-			}
+			});
 		}
 
 		// TODO: Test PartialApply on void instance method.
@@ -401,5 +402,32 @@ namespace LbmLib.Language.Experimental.Tests
 		// TODO: Test Bind on PartialApply on instance method.
 
 		// TODO: Test PartialApply on Bind on instance method.
+
+		// TODO: IsStatic tests.
+
+		static void AssertParameterInfosAreEqual(MethodInfo originalMethod, ClosureMethod partialAppliedMethod)
+		{
+			var expectedParameters = originalMethod.GetParameters().Skip(partialAppliedMethod.FixedArguments.Count).Select((parameter, index) =>
+				new
+				{
+					parameter.ParameterType,
+					parameter.Name,
+					parameter.Attributes,
+					parameter.DefaultValue,
+					Member = (MemberInfo)partialAppliedMethod,
+					Position = index,
+				});
+			var actualParameters = partialAppliedMethod.GetParameters().Select(parameter =>
+				new
+				{
+					parameter.ParameterType,
+					parameter.Name,
+					parameter.Attributes,
+					parameter.DefaultValue,
+					parameter.Member,
+					parameter.Position,
+				});
+			CollectionAssert.AreEqual(expectedParameters, actualParameters);
+		}
 	}
 }

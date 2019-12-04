@@ -10,36 +10,40 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void Control_StaticMethod_Error()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(MethodClosureExtensionsTestsSimple.SimpleStaticNonVoidMethod));
 				AssertStaticMethodErrors(fixture, method,
-					typeof(Func<string, int, long, int, string>),
-					typeof(Func<string, int, string, int, string>),
-					new object[] { "hello world", 1, 2L, 3 },
-					new object[] { "hello world", 1, 2L, "string" });
-			}
+					validDelegateType: typeof(Func<string, int, long, int, string>),
+					invalidDelegateType: typeof(Func<string, int, string, int, string>),
+					validSampleArgs: new object[] { "hello world", 1, 2L, 3 },
+					invalidSampleArgs: new object[] { "hello world", 1, 2L, "string" },
+					invokeIsAlwaysTargetException: false,
+					delegateDynamicInvokeIsAlwaysException: false);
+			});
 		}
 
 		[Test]
 		public void PartialApply_StaticMethod_Error()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(MethodClosureExtensionsTestsSimple.SimpleStaticNonVoidMethod));
 				var partialAppliedMethod = method.PartialApply("hello world", 1, 2L);
 				AssertStaticMethodErrors(fixture, partialAppliedMethod,
-					typeof(Func<int, string>),
-					typeof(Func<string, int>),
-					new object[] { 3 },
-					new object[] { "string" });
-			}
+					validDelegateType: typeof(Func<int, string>),
+					invalidDelegateType: typeof(Func<string, int>),
+					validSampleArgs: new object[] { 3 },
+					invalidSampleArgs: new object[] { "string" },
+					invokeIsAlwaysTargetException: false,
+					delegateDynamicInvokeIsAlwaysException: false);
+			});
 		}
 
 		[Test]
 		public void Multiple_PartialApply_StaticMethod_Error()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(MethodClosureExtensionsTestsSimple.SimpleStaticNonVoidMethod));
 				var partialAppliedMethod = method.PartialApply("hello world");
@@ -47,284 +51,416 @@ namespace LbmLib.Language.Experimental.Tests
 				partialAppliedMethod = partialAppliedMethod.PartialApply(2L);
 				partialAppliedMethod = partialAppliedMethod.PartialApply(3);
 				AssertStaticMethodErrors(fixture, partialAppliedMethod,
-					typeof(Func<string>),
-					typeof(Action),
-					new object[0],
-					null);
-			}
+					validDelegateType: typeof(Func<string>),
+					invalidDelegateType: typeof(Action),
+					validSampleArgs: new object[0],
+					invalidSampleArgs: null,
+					invokeIsAlwaysTargetException: false,
+					delegateDynamicInvokeIsAlwaysException: false);
+			});
 		}
 
-		[Test]
-		public void Control_StructInstanceMethod_Error()
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod),
+			typeof(Action<int, string[]>), typeof(Action<int, string>), true)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod),
+			typeof(Func<int, string[], int>), typeof(Func<int, string, int>), false)]
+		public void Control_StructInstanceMethod_Error(string methodName,
+			Type validDelegateType, Type invalidDelegateType, bool nullTargetDelegateIsException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(15);
-				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
+				var method = typeof(TestStruct).GetMethod(methodName);
 				AssertInstanceMethodErrors(fixture, v, method,
-					typeof(Action<int, string[]>),
-					typeof(Action<int, string>),
-					new object[] { 5, new[] { "hello", "world" } },
-					new object[] { 5, "string" });
-			}
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { 5, new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { 5, "string" },
+					nullTargetDelegateIsException);
+			});
 		}
 
-		[Test]
-		public void PartialApply_StructInstanceMethod_Error()
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod),
+			typeof(Action<string[]>), typeof(Action<string>), true)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod),
+			typeof(Func<string[], int>), typeof(Func<string, int>), false)]
+		public void PartialApply_StructInstanceMethod_Error(string methodName,
+			Type validDelegateType, Type invalidDelegateType, bool nullTargetDelegateIsException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(15);
-				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
+				var method = typeof(TestStruct).GetMethod(methodName);
 				var partialAppliedMethod = method.PartialApply(5);
 				AssertInstanceMethodErrors(fixture, v, partialAppliedMethod,
-					typeof(Action<string[]>),
-					typeof(Action<string>),
-					new object[] { new[] { "hello", "world" } },
-					new object[] { "string" });
-			}
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { "string" },
+					nullTargetDelegateIsException);
+			});
 		}
 
-		[Test]
-		public void Multiple_PartialApply_StructInstanceMethod_Error()
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod),
+			typeof(Action), typeof(Func<string>), true)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod),
+			typeof(Func<int>), typeof(Func<string>), false)]
+		public void Multiple_PartialApply_StructInstanceMethod_Error(string methodName,
+			Type validDelegateType, Type invalidDelegateType, bool nullTargetDelegateIsException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(15);
-				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
+				var method = typeof(TestStruct).GetMethod(methodName);
 				var partialAppliedMethod = method.PartialApply(5);
 				partialAppliedMethod = partialAppliedMethod.PartialApply(new object[] { new[] { "hello", "world" } });
 				AssertInstanceMethodErrors(fixture, v, partialAppliedMethod,
-					typeof(Action),
-					typeof(Func<string>),
-					new object[0],
-					null);
-			}
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[0],
+					invalidSampleArgs: null,
+					nullTargetDelegateIsException);
+			});
 		}
 
-		[Test]
-		public void Control_ClassInstanceMethod_Error()
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod),
+			typeof(Action<int, string[]>), typeof(Action<int, string>), true)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod),
+			typeof(Func<int, string[], int>), typeof(Action<int, string[]>), false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod),
+			typeof(Func<int, string[], TestClassSimple>), typeof(Func<int, string[], int>), false)]
+		public void Control_ClassInstanceMethod_Error(string methodName,
+			Type validDelegateType, Type invalidDelegateType, bool nullTargetDelegateIsException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
-				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
+				var method = typeof(TestClassSimple).GetMethod(methodName);
 				AssertInstanceMethodErrors(fixture, c, method,
-					typeof(Action<int, string[]>),
-					typeof(Action<int, string>),
-					new object[] { 5, new[] { "hello", "world" } },
-					new object[] { 5, "string" });
-			}
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { 5, new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { 5, "string" },
+					nullTargetDelegateIsException);
+			});
 		}
 
-		[Test]
-		public void PartialApply_ClassInstanceMethod_Error()
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod),
+			typeof(Action<string[]>), typeof(Action<string>), true)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod),
+			typeof(Func<string[], int>), typeof(Action<string[], int>), false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod),
+			typeof(Func<string[], TestClassSimple>), typeof(Func<string[], int>), false)]
+		public void PartialApply_ClassInstanceMethod_Error(string methodName,
+			Type validDelegateType, Type invalidDelegateType, bool nullTargetDelegateIsException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
-				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
+				var method = typeof(TestClassSimple).GetMethod(methodName);
 				var partialAppliedMethod = method.PartialApply(5);
 				AssertInstanceMethodErrors(fixture, c, partialAppliedMethod,
-					typeof(Action<string[]>),
-					typeof(Action<string>),
-					new object[] { new[] { "hello", "world" } },
-					new object[] { "string" });
-			}
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { "string" },
+					nullTargetDelegateIsException);
+			});
 		}
 
-		[Test]
-		public void Multiple_PartialApply_ClassInstanceMethod_Error()
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod),
+			typeof(Action), typeof(Func<string>), true)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod),
+			typeof(Func<int>), typeof(Func<string>), false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod),
+			typeof(Func<TestClassSimple>), typeof(Func<string>), false)]
+		public void Multiple_PartialApply_ClassInstanceMethod_Error(string methodName,
+			Type validDelegateType, Type invalidDelegateType, bool nullTargetDelegateIsException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
-				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
+				var method = typeof(TestClassSimple).GetMethod(methodName);
 				var partialAppliedMethod = method.PartialApply(5);
 				partialAppliedMethod = partialAppliedMethod.PartialApply(new object[] { new[] { "hello", "world" } });
 				AssertInstanceMethodErrors(fixture, c, partialAppliedMethod,
-					typeof(Action),
-					typeof(Func<string>),
-					new object[0],
-					null);
-			}
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[0],
+					invalidSampleArgs: null,
+					nullTargetDelegateIsException);
+			});
 		}
 
 		[Test]
 		public void Bind_StaticMethod_Error()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(MethodClosureExtensionsTestsSimple.SimpleStaticNonVoidMethod));
 				// Static method cannot be bound.
 				Assert.Throws(typeof(ArgumentException), () => method.Bind(this));
-				// Bind(null) is never valid.
-				Assert.Throws(typeof(ArgumentNullException), () => method.Bind(null));
-			}
+			});
 		}
 
 		[Test]
 		public void Bind_PartialApply_StaticMethod_Error()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(MethodClosureExtensionsTestsSimple.SimpleStaticNonVoidMethod));
 				var partialAppliedMethod = method.PartialApply("hello world", 1, 2L);
 				// Static method cannot be bound.
 				Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.Bind(this));
-				// Bind(null) is never valid.
-				Assert.Throws(typeof(ArgumentNullException), () => partialAppliedMethod.Bind(null));
-			}
+			});
 		}
 
-		[Test]
-		public void Bind_StructInstanceMethod_Error()
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod), false,
+			typeof(Action<int, string[]>), typeof(Action<int, string>), false, false)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod), false,
+			typeof(Func<int, string[], int>), typeof(Func<int, string, int>), false, false)]
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod), true,
+			typeof(Action<int, string[]>), typeof(Action<int, string>), true, true)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod), true,
+			typeof(Func<int, string[], int>), typeof(Func<int, string, int>), true, false)]
+		public void Bind_StructInstanceMethod_Error(string methodName, bool bindNull,
+			Type validDelegateType, Type invalidDelegateType, bool invokeIsAlwaysTargetException, bool delegateDynamicInvokeIsAlwaysException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(15);
-				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
+				var method = typeof(TestStruct).GetMethod(methodName);
 				// Instance method cannot be bound to invalid target.
 				Assert.Throws(typeof(ArgumentException), () => method.Bind(this));
-				// Bind(null) is never valid.
-				Assert.Throws(typeof(ArgumentNullException), () => method.Bind(null));
-				var boundMethod = method.Bind(v);
+				var boundMethod = bindNull ? method.Bind(null) : method.Bind(v);
 				AssertStaticMethodErrors(fixture, boundMethod,
-					typeof(Action<int, string[]>),
-					typeof(Action<int, string>),
-					new object[] { 5, new[] { "hello", "world" } },
-					new object[] { 5, "string" });
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { 5, new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { 5, "string" },
+					invokeIsAlwaysTargetException,
+					delegateDynamicInvokeIsAlwaysException);
 				// Bound method cannot be rebound.
 				Assert.Throws(typeof(ArgumentException), () => boundMethod.Bind(v));
-			}
+			});
 		}
 
-		[Test]
-		public void Bind_PartialApply_StructInstanceMethod_Error()
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod), false,
+			typeof(Action<string[]>), typeof(Action<string>), false, false)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod), false,
+			typeof(Func<string[], int>), typeof(Func<string, int>), false, false)]
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod), true,
+			typeof(Action<string[]>), typeof(Action<string>), true, true)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod), true,
+			typeof(Func<string[], int>), typeof(Func<string, int>), true, false)]
+		public void Bind_PartialApply_StructInstanceMethod_Error(string methodName, bool bindNull,
+			Type validDelegateType, Type invalidDelegateType, bool invokeIsAlwaysTargetException, bool delegateDynamicInvokeIsAlwaysException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(15);
-				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
+				var method = typeof(TestStruct).GetMethod(methodName);
 				var partialAppliedMethod = method.PartialApply(5);
-				var boundMethod = partialAppliedMethod.Bind(v);
+				var boundMethod = bindNull ? partialAppliedMethod.Bind(null) : partialAppliedMethod.Bind(v);
 				AssertStaticMethodErrors(fixture, boundMethod,
-					typeof(Action<string[]>),
-					typeof(Action<string>),
-					new object[] { new[] { "hello", "world" } },
-					new object[] { "string" });
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { "string" },
+					invokeIsAlwaysTargetException,
+					delegateDynamicInvokeIsAlwaysException);
 				// Bound partially applied method cannot be rebound.
 				Assert.Throws(typeof(ArgumentException), () => boundMethod.Bind(v));
-			}
+			});
 		}
 
-		[Test]
-		public void PartialApply_Bind_StructInstanceMethod_Error()
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod), false,
+			typeof(Action<string[]>), typeof(Action<string>), false, false)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod), false,
+			typeof(Func<string[], int>), typeof(Func<string, int>), false, false)]
+		[TestCase(nameof(TestStruct.SimpleInstanceVoidMethod), true,
+			typeof(Action<string[]>), typeof(Action<string>), true, true)]
+		[TestCase(nameof(TestStruct.SimpleInstanceNoThisUsageMethod), true,
+			typeof(Func<string[], int>), typeof(Func<string, int>), true, false)]
+		public void PartialApply_Bind_StructInstanceMethod_Error(string methodName, bool bindNull,
+			Type validDelegateType, Type invalidDelegateType, bool invokeIsAlwaysTargetException, bool delegateDynamicInvokeIsAlwaysException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(15);
-				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
-				var boundMethod = method.Bind(v);
+				var method = typeof(TestStruct).GetMethod(methodName);
+				var boundMethod = bindNull ? method.Bind(null) : method.Bind(v);
 				var partialAppliedMethod = boundMethod.PartialApply(5);
 				AssertStaticMethodErrors(fixture, partialAppliedMethod,
-					typeof(Action<string[]>),
-					typeof(Action<string>),
-					new object[] { new[] { "hello", "world" } },
-					new object[] { "string" });
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { "string" },
+					invokeIsAlwaysTargetException,
+					delegateDynamicInvokeIsAlwaysException);
 				// Partially applied bound method cannot be rebound.
 				Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.Bind(v));
-			}
+			});
 		}
 
-		[Test]
-		public void Bind_ClassInstanceMethod_Error()
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod), false,
+			typeof(Action<int, string[]>), typeof(Action<int, string>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod), false,
+			typeof(Func<int, string[], int>), typeof(Action<int, string[]>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod), false,
+			typeof(Func<int, string[], TestClassSimple>), typeof(Func<int, string[], int>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod), true,
+			typeof(Action<int, string[]>), typeof(Action<int, string>), true, true)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod), true,
+			typeof(Func<int, string[], int>), typeof(Action<int, string[]>), true, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod), true,
+			typeof(Func<int, string[], TestClassSimple>), typeof(Func<int, string[], int>), true, false)]
+		public void Bind_ClassInstanceMethod_Error(string methodName, bool bindNull,
+			Type validDelegateType, Type invalidDelegateType, bool invokeIsAlwaysTargetException, bool delegateDynamicInvokeIsAlwaysException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
-				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
+				var method = typeof(TestClassSimple).GetMethod(methodName);
 				// Instance method cannot be bound to invalid target.
 				Assert.Throws(typeof(ArgumentException), () => method.Bind(this));
-				// Bind(null) is never valid.
-				Assert.Throws(typeof(ArgumentNullException), () => method.Bind(null));
-				var boundMethod = method.Bind(c);
+				var boundMethod = bindNull ? method.Bind(null) : method.Bind(c);
 				AssertStaticMethodErrors(fixture, boundMethod,
-					typeof(Action<int, string[]>),
-					typeof(Action<int, string>),
-					new object[] { 5, new[] { "hello", "world" } },
-					new object[] { 5, "string" });
-			}
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { 5, new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { 5, "string" },
+					invokeIsAlwaysTargetException,
+					delegateDynamicInvokeIsAlwaysException);
+			});
 		}
 
-		[Test]
-		public void Bind_PartialApply_ClassInstanceMethod_Error()
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod), false,
+			typeof(Action<string[]>), typeof(Action<string>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod), false,
+			typeof(Func<string[], int>), typeof(Action<string[], int>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod), false,
+			typeof(Func<string[], TestClassSimple>), typeof(Func<string[], int>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod), true,
+			typeof(Action<string[]>), typeof(Action<string>), true, true)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod), true,
+			typeof(Func<string[], int>), typeof(Action<string[], int>), true, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod), true,
+			typeof(Func<string[], TestClassSimple>), typeof(Func<string[], int>), true, false)]
+		public void Bind_PartialApply_ClassInstanceMethod_Error(string methodName, bool bindNull,
+			Type validDelegateType, Type invalidDelegateType, bool invokeIsAlwaysTargetException, bool delegateDynamicInvokeIsAlwaysException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
-				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
+				var method = typeof(TestClassSimple).GetMethod(methodName);
 				var partialAppliedMethod = method.PartialApply(5);
-				var boundMethod = partialAppliedMethod.Bind(c);
+				var boundMethod = bindNull ? partialAppliedMethod.Bind(null) : partialAppliedMethod.Bind(c);
 				AssertStaticMethodErrors(fixture, boundMethod,
-					typeof(Action<string[]>),
-					typeof(Action<string>),
-					new object[] { new[] { "hello", "world" } },
-					new object[] { "string" });
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { "string" },
+					invokeIsAlwaysTargetException,
+					delegateDynamicInvokeIsAlwaysException);
 				// Bound partially applied method cannot be rebound.
 				Assert.Throws(typeof(ArgumentException), () => boundMethod.Bind(c));
-			}
+			});
 		}
 
-		[Test]
-		public void PartialApply_Bind_ClassInstanceMethod_Error()
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod), false,
+			typeof(Action<string[]>), typeof(Action<string>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod), false,
+			typeof(Func<string[], int>), typeof(Action<string[], int>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod), false,
+			typeof(Func<string[], TestClassSimple>), typeof(Func<string[], int>), false, false)]
+		[TestCase(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod), true,
+			typeof(Action<string[]>), typeof(Action<string>), true, true)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceNoThisUsageMethod), true,
+			typeof(Func<string[], int>), typeof(Action<string[], int>), true, false)]
+		[TestCase(nameof(TestClassSimple.SimpleInstanceSafeThisUsageMethod), true,
+			typeof(Func<string[], TestClassSimple>), typeof(Func<string[], int>), true, false)]
+		public void PartialApply_Bind_ClassInstanceMethod_Error(string methodName, bool bindNull,
+			Type validDelegateType, Type invalidDelegateType, bool invokeIsAlwaysTargetException, bool delegateDynamicInvokeIsAlwaysException)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
-				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
-				var boundMethod = method.Bind(c);
+				var method = typeof(TestClassSimple).GetMethod(methodName);
+				var boundMethod = bindNull ? method.Bind(null) : method.Bind(c);
 				var partialAppliedMethod = boundMethod.PartialApply(5);
 				AssertStaticMethodErrors(fixture, partialAppliedMethod,
-					typeof(Action<string[]>),
-					typeof(Action<string>),
-					new object[] { new[] { "hello", "world" } },
-					new object[] { "string" });
+					validDelegateType,
+					invalidDelegateType,
+					validSampleArgs: new object[] { new[] { "hello", "world" } },
+					invalidSampleArgs: new object[] { "string" },
+					invokeIsAlwaysTargetException,
+					delegateDynamicInvokeIsAlwaysException);
 				// Partially applied bound method cannot be rebound.
 				Assert.Throws(typeof(ArgumentException), () => partialAppliedMethod.Bind(c));
-			}
+			});
 		}
+
+		// TODO: IsStatic tests.
 
 		void AssertStaticMethodErrors(MethodClosureExtensionsFixture fixture, MethodInfo method,
 			Type validDelegateType, Type invalidDelegateType,
-			object[] validSampleArgs, object[] invalidSampleArgs)
+			object[] validSampleArgs, object[] invalidSampleArgs,
+			bool invokeIsAlwaysTargetException, bool delegateDynamicInvokeIsAlwaysException)
 		{
-			using (fixture.DebugOnlyFilter())
+			if (invokeIsAlwaysTargetException)
 			{
-				// Verify that validDelegateType and validSampleArgs are, well, valid.
-				method.Invoke(null, validSampleArgs);
-				method.CreateDelegate(validDelegateType).DynamicInvoke(validSampleArgs);
-				// Invocation target is ignored for static methods.
-				method.Invoke(this, validSampleArgs);
-				// null is valid target for static method CreateDelegate.
-				method.CreateDelegate(validDelegateType, null).DynamicInvoke(validSampleArgs);
+				Assert.Throws(typeof(TargetException), () => method.Invoke(null, validSampleArgs));
+				Assert.Throws(typeof(TargetException), () => method.Invoke(this, validSampleArgs));
+			}
+			else
+			{
+				using (fixture.DebugOnlyFilter())
+				{
+					// Verify that validSampleArgs is, well, valid.
+					method.Invoke(null, validSampleArgs);
+					// Invocation target is ignored for static methods.
+					method.Invoke(this, validSampleArgs);
+				}
+			}
+			if (delegateDynamicInvokeIsAlwaysException)
+			{
+				var @delegate = method.CreateDelegate(validDelegateType);
+				Assert.Throws(typeof(TargetInvocationException), () => @delegate.DynamicInvoke(validSampleArgs));
+				@delegate = method.CreateDelegate(validDelegateType, null);
+				Assert.Throws(typeof(TargetInvocationException), () => @delegate.DynamicInvoke(validSampleArgs));
+			}
+			else
+			{
+				using (fixture.DebugOnlyFilter())
+				{
+					// Verify that validDelegateType is indeed valid.
+					method.CreateDelegate(validDelegateType).DynamicInvoke(validSampleArgs);
+					// null is valid target for static method CreateDelegate.
+					method.CreateDelegate(validDelegateType, null).DynamicInvoke(validSampleArgs);
+				}
 			}
 			if (validSampleArgs.Length > 0)
 			{
 				// Method cannot be invoked with too few parameters.
-				Assert.Throws(typeof(TargetParameterCountException), () => method.Invoke(null, new object[0]));
+				Assert.Throws(invokeIsAlwaysTargetException ? typeof(TargetException) : typeof(TargetParameterCountException),
+					() => method.Invoke(null, new object[0]));
 			}
 			// Method cannot be invoked with too many parameters.
-			Assert.Throws(typeof(TargetParameterCountException), () => method.Invoke(null, validSampleArgs.Append("extra")));
+			Assert.Throws(invokeIsAlwaysTargetException ? typeof(TargetException) : typeof(TargetParameterCountException),
+				() => method.Invoke(null, validSampleArgs.Append("extra")));
 			if (!(invalidSampleArgs is null))
 			{
 				// Method cannot be invoked with invalid parameter type.
-				Assert.Throws(typeof(ArgumentException), () => method.Invoke(null, invalidSampleArgs));
+				Assert.Throws(invokeIsAlwaysTargetException ? typeof(TargetException) : typeof(ArgumentException),
+					() => method.Invoke(null, invalidSampleArgs));
 			}
 			// Static method CreateDelegate cannot be invoked with a non-null target.
 			// Note: On Mono runtime, TargetParameterCountException will be thrown by MethodInfo.CreateDelegate.
 			// In all other cases (MethodInfo.CreateDelegate on MS .NET runtime, ClosureMethod.CreateDelegate), ArgumentException will be thrown.
 			AssertThrowsOneOfTwoExceptions<ArgumentException, TargetParameterCountException>(() => method.CreateDelegate(validDelegateType, this));
+			// CreateDelegate cannot be invoked with null delegate type.
+			Assert.Throws(typeof(ArgumentNullException), () => method.CreateDelegate(null));
 			// CreateDelegate cannot be invoked with an invalid delegate type.
 			// Note: On Mono runtime, if Action/Func and has wrong # of type parameters, TargetParameterCountException is thrown instead
 			// so just ensure either the Action is passed for Func (or vice versa), or the same # of type parameters are passed,
@@ -334,7 +470,8 @@ namespace LbmLib.Language.Experimental.Tests
 
 		void AssertInstanceMethodErrors(MethodClosureExtensionsFixture fixture, object instance, MethodInfo method,
 			Type validDelegateType, Type invalidDelegateType,
-			object[] validSampleArgs, object[] invalidSampleArgs)
+			object[] validSampleArgs, object[] invalidSampleArgs,
+			bool nullTargetDelegateIsException)
 		{
 			using (fixture.DebugOnlyFilter())
 			{
@@ -367,11 +504,18 @@ namespace LbmLib.Language.Experimental.Tests
 			// so just ensure either the Action is passed for Func (or vice versa), or the same # of type parameters are passed,
 			// just with wrong type parameter(s).
 			Assert.Throws(typeof(ArgumentException), () => method.CreateDelegate(invalidDelegateType, instance));
+			// CreateDelegate cannot be invoked with null delegate type.
+			Assert.Throws(typeof(ArgumentNullException), () => method.CreateDelegate(null));
+			Assert.Throws(typeof(ArgumentNullException), () => method.CreateDelegate(null, null));
+			Assert.Throws(typeof(ArgumentNullException), () => method.CreateDelegate(null, instance));
 			// CreateDelegate(delegateType, null) doesn't throw error, but invocation of the resulting delegate results is invalid.
 			// Note: On Mono runtime, TargetException will be thrown by MethodInfo.CreateDelegate.
 			// In all other cases (MethodInfo.CreateDelegate on MS .NET runtime, ClosureMethod.CreateDelegate), TargetInvocationException will be thrown.
 			var nullBoundDelegate = method.CreateDelegate(validDelegateType, null);
-			AssertThrowsOneOfTwoExceptions<TargetInvocationException, TargetException>(() => nullBoundDelegate.DynamicInvoke(validSampleArgs));
+			if (nullTargetDelegateIsException)
+				AssertThrowsOneOfTwoExceptions<TargetInvocationException, TargetException>(() => nullBoundDelegate.DynamicInvoke(validSampleArgs));
+			else
+				nullBoundDelegate.DynamicInvoke(validSampleArgs);
 		}
 
 		static void AssertThrowsOneOfTwoExceptions<E1, E2>(TestDelegate testDelegate) where E1 : Exception where E2 : Exception
@@ -381,9 +525,9 @@ namespace LbmLib.Language.Experimental.Tests
 				testDelegate();
 				return;
 			}
-			catch (Exception ex)
+			catch (Exception exception)
 			{
-				if (ex is E1 || ex is E2)
+				if (exception is E1 || exception is E2)
 					return;
 				Assert.Throws(typeof(ArgumentException), testDelegate);
 			}

@@ -15,7 +15,7 @@ namespace LbmLib.Language.Experimental.Tests
 		{
 			int delegateCount = 20;
 			int gcInterval = 5;
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				fixture.AssertClosureRegistryCountAfterFullGCFinalization(0, "after initial GC");
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod));
@@ -43,7 +43,7 @@ namespace LbmLib.Language.Experimental.Tests
 				Assert.AreEqual(20 * 20 * 20 * 20, x);
 				//Logging.Log($"DEBUG before final GC:\n{ClosureMethod.Registry}");
 				// MethodClosureExtensionsFixture's Dispose will call AssertEmptyClosureRegistryAfterTryFullGCFinalization a final time, so don't need to call it here.
-			}
+			});
 		}
 
 		[Test]
@@ -53,7 +53,7 @@ namespace LbmLib.Language.Experimental.Tests
 			var threadCount = 10;
 			var delegatePerThreadCount = 10;
 			var delegatePerThreadGCInterval = 5;
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				fixture.AssertClosureRegistryCountAfterFullGCFinalization(0, "after initial GC");
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod));
@@ -79,34 +79,39 @@ namespace LbmLib.Language.Experimental.Tests
 						{
 							for (var i = 0; i < delegatePerThreadCount; i++)
 							{
-								if (gcAtIntervals)
+								// This one-off Action ensures that any (implicit) local variables within its body are finalizable afterwards.
+								// This is a workaround for the issue where local variables in a method are not finalizable after last usage in DEBUG builds.
+								((Action)(() =>
 								{
-									lock (fixture.GCSync)
-									{
-										partialAppliedDelegatePerThread[threadIndex] =
-											partialAppliedMethod.CreateDelegate<MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod_PartialApply_Delegate>();
-									}
-								}
-								else
-								{
-									partialAppliedDelegatePerThread[threadIndex] =
-										partialAppliedMethod.CreateDelegate<MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod_PartialApply_Delegate>();
-								}
-								if (i % delegatePerThreadGCInterval == 0)
-								{
-									// Test that the partially applied method delegate still works in this thread.
-									var x = threadIndex * i;
-									partialAppliedDelegatePerThread[threadIndex](null, new List<string>() { "qwerty" }, x, ref x);
-									Assert.AreEqual(threadIndex * i * threadIndex * i, x);
 									if (gcAtIntervals)
 									{
 										lock (fixture.GCSync)
 										{
-											Logging.Log($"DEBUG before GC {i / delegatePerThreadGCInterval} in thread {threadIndex}:\n{ClosureMethod.Registry}");
-											fixture.AssertClosureRegistryCountAfterFullGCFinalization(
-												partialAppliedDelegatePerThread.Where(@delegate => !(@delegate is null)).Count(),
-												$"after GC {i / delegatePerThreadGCInterval} in thread {threadIndex}");
+											partialAppliedDelegatePerThread[threadIndex] =
+												partialAppliedMethod.CreateDelegate<MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod_PartialApply_Delegate>();
 										}
+									}
+									else
+									{
+										partialAppliedDelegatePerThread[threadIndex] =
+											partialAppliedMethod.CreateDelegate<MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod_PartialApply_Delegate>();
+									}
+									if (i % delegatePerThreadGCInterval == 0)
+									{
+										// Test that the partially applied method delegate still works in this thread.
+										var x = threadIndex * i;
+										partialAppliedDelegatePerThread[threadIndex](null, new List<string>() { "qwerty" }, x, ref x);
+										Assert.AreEqual(threadIndex * i * threadIndex * i, x);
+									}
+								}))();
+								if (i % delegatePerThreadGCInterval == 0 && gcAtIntervals)
+								{
+									lock (fixture.GCSync)
+									{
+										Logging.Log($"DEBUG before GC {i / delegatePerThreadGCInterval} in thread {threadIndex}:\n{ClosureMethod.Registry}");
+										fixture.AssertClosureRegistryCountAfterFullGCFinalization(
+											partialAppliedDelegatePerThread.Where(@delegate => !(@delegate is null)).Count(),
+											$"after GC {i / delegatePerThreadGCInterval} in thread {threadIndex}");
 									}
 								}
 							}
@@ -115,7 +120,7 @@ namespace LbmLib.Language.Experimental.Tests
 						{
 							unexpectedExceptionPerThread[threadIndex] = exception;
 							Logging.Log($"DEBUG exception in thread {threadIndex}:\n{exception}");
-							throw exception;
+							throw;
 						}
 						finally
 						{
@@ -129,6 +134,16 @@ namespace LbmLib.Language.Experimental.Tests
 				foreach (var thread in threads)
 					thread.Join();
 
+				for (var threadIndex = 0; threadIndex < threadCount; threadIndex++)
+				{
+					var exception = unexpectedExceptionPerThread[threadIndex];
+					if (!(exception is null))
+					{
+						// Wrapping in a new exception to preserve the stack trace (since throw sets thrown exception's stack trace).
+						throw new Exception("Unexpected exception", exception);
+					}
+				}
+
 				lock (fixture.GCSync)
 				{
 					//Logging.Log($"DEBUG before GC after all threads joined:\n{ClosureMethod.Registry}");
@@ -136,11 +151,9 @@ namespace LbmLib.Language.Experimental.Tests
 						threadCount,
 						"after GC after all threads joined");
 				}
+
 				for (var threadIndex = 0; threadIndex < threadCount; threadIndex++)
 				{
-					var exception = unexpectedExceptionPerThread[threadIndex];
-					if (!(exception is null))
-						throw exception;
 					// Test that the latest partially applied method delegate still works.
 					var x = threadIndex;
 					partialAppliedDelegatePerThread[threadIndex](null, new List<string>() { "qwerty" }, 40L, ref x);
@@ -151,7 +164,7 @@ namespace LbmLib.Language.Experimental.Tests
 				//	Logging.Log($"DEBUG before final GC:\n{ClosureMethod.Registry}");
 				//	// MethodClosureExtensionsFixture's Dispose will call AssertEmptyClosureRegistryAfterTryFullGCFinalization a final time, so don't need to call it here.
 				//}
-			}
+			});
 		}
 	}
 }

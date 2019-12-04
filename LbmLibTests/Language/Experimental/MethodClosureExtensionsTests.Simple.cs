@@ -9,8 +9,15 @@ namespace LbmLib.Language.Experimental.Tests
 		public void SimpleInstanceVoidMethod(int y, params string[] ss)
 		{
 			Logging.Log(X, "x");
+			SimpleInstanceNoThisUsageMethod(y, ss);
+		}
+
+		// Used in MethodClosureExtensionsTests.Errors.
+		public int SimpleInstanceNoThisUsageMethod(int y, params string[] ss)
+		{
 			Logging.Log(y, "y");
 			Logging.Log(ss.ToDebugString(), "ss");
+			return y;
 		}
 	}
 
@@ -31,8 +38,23 @@ namespace LbmLib.Language.Experimental.Tests
 		public virtual void SimpleVirtualInstanceVoidMethod(int y, params string[] ss)
 		{
 			Logging.Log(X, "x");
+			SimpleInstanceNoThisUsageMethod(y, ss);
+		}
+
+		// Used in MethodClosureExtensionsTests.Errors.
+		public int SimpleInstanceNoThisUsageMethod(int y, params string[] ss)
+		{
 			Logging.Log(y, "y");
 			Logging.Log(ss.ToDebugString(), "ss");
+			return y;
+		}
+
+		// Used in MethodClosureExtensionsTests.Errors.
+		public TestClassSimple SimpleInstanceSafeThisUsageMethod(int y, params string[] ss)
+		{
+			Logging.Log(this?.ToString() ?? "null", "ZeroParamsInstanceNoThisUsageMethod");
+			SimpleInstanceNoThisUsageMethod(y, ss);
+			return this;
 		}
 	}
 
@@ -56,7 +78,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void Control_SimpleStaticVoidMethod([Values] bool emptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				SimpleStaticVoidMethod("mystring", 2, 4L, 100);
 
@@ -89,13 +111,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"l: 4",
 					"x: 100",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void PartialApply_SimpleStaticVoidMethod()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(SimpleStaticVoidMethod));
 				var fixedArguments = new object[] { "hello world", 20 };
@@ -118,13 +140,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"l: 30",
 					"x: 10",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void Control_SimpleStaticNonVoidMethod([Values] bool emptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var returnValue = SimpleStaticNonVoidMethod("mystring", 2, 4L, 100);
 				Assert.AreEqual("asdf", returnValue);
@@ -167,13 +189,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"l: 4",
 					"x: 100",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void PartialApply_SimpleStaticNonVoidMethod()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var method = typeof(MethodClosureExtensionsTestsSimple).GetMethod(nameof(SimpleStaticNonVoidMethod));
 				var fixedArguments = new object[] { "hello world", 1, 2L };
@@ -205,13 +227,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"l: 2",
 					"x: 7",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void Control_SimpleInstanceVoidMethod([Values] bool emptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(-15);
 				v.SimpleInstanceVoidMethod(-5, "home", "alone");
@@ -242,7 +264,7 @@ namespace LbmLib.Language.Experimental.Tests
 					"y: -5",
 					"ss: string[] { home, alone }",
 				};
-			}
+			});
 		}
 
 		delegate void SimpleInstanceVoidMethod_PartialApply_Delegate(params string[] ss);
@@ -250,7 +272,7 @@ namespace LbmLib.Language.Experimental.Tests
 		[Test]
 		public void PartialApply_SimpleInstanceVoidMethod()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(15);
 				var method = typeof(TestStruct).GetMethod(nameof(TestStruct.SimpleInstanceVoidMethod));
@@ -272,13 +294,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"y: 5",
 					"ss: string[] { hi, there }",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void Control_SimpleInstanceNonVoidMethod([Values] bool emptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(-15);
 				var returnValue = c.SimpleInstanceNonVoidMethod(-5, "home", "alone");
@@ -311,13 +333,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"y: -5",
 					"ss: string[] { home, alone }",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void PartialApply_SimpleInstanceNonVoidMethod()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
 				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleInstanceNonVoidMethod));
@@ -341,13 +363,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"y: 5",
 					"ss: string[] { hi, there }",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void Control_SimpleVirtualInstanceVoidMethod([Values] bool emptyPartialApply)
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(-15);
 				c.SimpleVirtualInstanceVoidMethod(-5, "home", "alone");
@@ -378,13 +400,13 @@ namespace LbmLib.Language.Experimental.Tests
 					"y: -5",
 					"ss: string[] { home, alone }",
 				};
-			}
+			});
 		}
 
 		[Test]
 		public void PartialApply_SimpleVirtualInstanceVoidMethod()
 		{
-			using (var fixture = new MethodClosureExtensionsFixture())
+			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
 				var method = typeof(TestClassSimple).GetMethod(nameof(TestClassSimple.SimpleVirtualInstanceVoidMethod));
@@ -407,7 +429,7 @@ namespace LbmLib.Language.Experimental.Tests
 					"y: 5",
 					"ss: string[] { hi, there }",
 				};
-			}
+			});
 		}
 
 		// TODO: Test PartialApply with fixed arguments for all parameters.
@@ -418,5 +440,7 @@ namespace LbmLib.Language.Experimental.Tests
 		// TODO: Test Bind on PartialApply on instance method.
 
 		// TODO: Test PartialApply on Bind on instance method.
+
+		// TODO: IsStatic tests.
 	}
 }

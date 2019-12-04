@@ -15,28 +15,71 @@ using System.Runtime.CompilerServices; // for ConditionalWeakTable
 
 namespace LbmLib.Language.Experimental
 {
+	public enum ClosureMethodType
+	{
+		// ClosureMethod is static method, ClosureMethod.OriginalMethod is static method.
+		// staticMethod.PartialApply(...) still results in a Static-type method.
+		Static,
+
+		// ClosureMethod is instance method, ClosureMethod.OriginalMethod is instance method,
+		// instance is passed as obj argument in Invoke call (or target argument in CreateDelegate call).
+		// instanceMethod.PartialApply(...) still results in an Instance-type method.
+		Instance,
+
+		// ClosureMethod is static method, ClosureMethod.OriginalMethod is instance method,
+		// instance is passed as additional first element in parameters argument in Invoke call
+		// (or additional first parameter in delegate call).
+		// instanceMethod.AsStatic() results in an InstanceAsStatic-type method.
+		InstanceAsStatic,
+
+		// ClosureMethod is static method, ClosureMethod.OriginalMethod is instance method,
+		// instance is ClosureMethod.FixedThisArgument.
+		// instanceMethod.Bind(target) results in a BoundInstance-type method, where target becomes FixedThisArgument.
+		// instanceAsStaticMethod.PartialApply(target, otherArguments...) also results in a BoundInstance-type method,
+		// where instanceAsStaticMethod is an InstanceAsStatic-type method, and target becomes FixedThisArgument
+		// (and otherArguments... is appended to FixedArguments).
+		BoundInstance,
+	}
+
 	public sealed class ClosureMethod : MethodInfo
 	{
 		public MethodInfo OriginalMethod { get; }
 
 		readonly MethodAttributes methodAttributes;
-		readonly ParameterInfo[] nonFixedParameterInfos;
 		readonly MethodInfo genericMethodDefinition;
+		readonly ParameterInfo[] originalParameterInfos;
+
+		public ClosureMethodType MethodType { get; }
 
 		public object FixedThisArgument { get; }
 
 		public IRefList<object> FixedArguments { get; }
 
 		// Lazily computed.
+		ParameterInfo[] nonFixedParameterInfos;
 		string methodName;
 
-		internal ClosureMethod(MethodInfo originalMethod, MethodAttributes methodAttributes, ParameterInfo[] nonFixedParameterInfos,
-			MethodInfo genericMethodDefinition, object fixedThisArgument, IRefList<object> fixedArguments)
+		internal ClosureMethod(ClosureMethodType methodType, MethodInfo originalMethod, MethodInfo genericMethodDefinition,
+			MethodAttributes methodAttributes, ParameterInfo[] originalParameterInfos,
+			object fixedThisArgument, IRefList<object> fixedArguments)
 		{
+			MethodType = methodType;
 			OriginalMethod = originalMethod;
+			this.genericMethodDefinition = originalMethod == genericMethodDefinition ? this : genericMethodDefinition;
 			this.methodAttributes = methodAttributes;
-			this.nonFixedParameterInfos = nonFixedParameterInfos;
-			this.genericMethodDefinition = genericMethodDefinition;
+			this.originalParameterInfos = originalParameterInfos;
+			FixedThisArgument = fixedThisArgument;
+			FixedArguments = fixedArguments;
+		}
+
+		internal ClosureMethod(ClosureMethod closureMethod, ClosureMethodType methodType, MethodInfo genericMethodDefinition,
+			MethodAttributes methodAttributes, object fixedThisArgument, IRefList<object> fixedArguments)
+		{
+			MethodType = methodType;
+			OriginalMethod = closureMethod.OriginalMethod;
+			this.genericMethodDefinition = closureMethod == genericMethodDefinition ? this : genericMethodDefinition;
+			this.methodAttributes = methodAttributes;
+			originalParameterInfos = closureMethod.originalParameterInfos;
 			FixedThisArgument = fixedThisArgument;
 			FixedArguments = fixedArguments;
 		}
@@ -57,40 +100,48 @@ namespace LbmLib.Language.Experimental
 
 			internal int MinimumFreeRegistryKey = 0;
 
-			public int RegisterFixedArguments(IRefList<object> fixedArguments)
+			// Placeholder reflist for reserving a registry key.
+			readonly IRefList<object> placeholder = new object[] { "placeholder" }.AsRefList();
+
+			public int Register()
 			{
 				// XXX: This is thread-locking and O(n) even with a minimum key optimization,
 				// but it should suffice for now, so long as delegate closures aren't created in the thousands or so.
 				int registryKey;
 				lock (this)
 				{
-					registryKey = RegisterFixedArgumentsInternal(fixedArguments);
+					var closureCount = FixedArgumentsRegistry.Count;
+					while (MinimumFreeRegistryKey < closureCount)
+					{
+						registryKey = MinimumFreeRegistryKey;
+						MinimumFreeRegistryKey++;
+						if (FixedArgumentsRegistry[registryKey] is null)
+						{
+							FixedArgumentsRegistry[registryKey] = placeholder;
+							goto End;
+						}
+					}
+					MinimumFreeRegistryKey++;
+					FixedArgumentsRegistry.Add(placeholder);
+#if NET35
+					OwnerWeakReferenceRegistry.Add(null);
+#endif
+					registryKey = closureCount;
 				}
+			End:
 #if GENERATE_DEBUG_LOGGING
-				Logging.Log($"DEBUG RegisterFixedArguments(fixedArguments={fixedArguments.ToDebugString()}) => registryKey={registryKey}");
+				Logging.Log($"DEBUG Register() => registryKey={registryKey}");
 #endif
 				return registryKey;
 			}
 
-			int RegisterFixedArgumentsInternal(IRefList<object> closure)
+			public int RegisterFixedArguments(int registryKey, IRefList<object> fixedArguments)
 			{
-				var closureCount = FixedArgumentsRegistry.Count;
-				while (MinimumFreeRegistryKey < closureCount)
-				{
-					var registryKey = MinimumFreeRegistryKey;
-					MinimumFreeRegistryKey++;
-					if (FixedArgumentsRegistry[registryKey] is null)
-					{
-						FixedArgumentsRegistry[registryKey] = closure;
-						return registryKey;
-					}
-				}
-				MinimumFreeRegistryKey++;
-				FixedArgumentsRegistry.Add(closure);
-#if NET35
-				OwnerWeakReferenceRegistry.Add(null);
+				FixedArgumentsRegistry[registryKey] = fixedArguments;
+#if GENERATE_DEBUG_LOGGING
+				Logging.Log($"DEBUG RegisterFixedArguments(registryKey={registryKey}, fixedArguments={fixedArguments.ToDebugString()})");
 #endif
-				return closureCount;
+				return registryKey;
 			}
 
 			public void RegisterClosureOwner(int registryKey, object closureOwner)
@@ -155,6 +206,7 @@ namespace LbmLib.Language.Experimental
 #endif
 						lock (Registry)
 						{
+							// TODO: There should be a max key optimization in case the lists grow fairly large.
 							var fixedArgumentsRegistry = Registry.FixedArgumentsRegistry;
 							var ownerWeakReferencesRegistry = Registry.OwnerWeakReferenceRegistry;
 							var closureCount = fixedArgumentsRegistry.Count;
@@ -211,7 +263,7 @@ namespace LbmLib.Language.Experimental
 		public string ToDebugString(bool includeNamespace = true, bool includeDeclaringType = true)
 		{
 			var originalParameters = OriginalMethod.GetParameters();
-			return (IsStatic ? "static " : FixedThisArgument is null ? "" : "#" + FixedThisArgument.ToDebugString() + "#.") +
+			return (IsStatic ? "static " : MethodType is ClosureMethodType.BoundInstance ? "#" + FixedThisArgument.ToDebugString() + "#." : "") +
 				ReturnType.ToDebugString(includeNamespace, includeDeclaringType) + " " +
 				(!includeDeclaringType || DeclaringType is null ? "" : DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + ":") +
 				OriginalMethod.Name + "(" + Enumerable.Concat(
@@ -225,17 +277,32 @@ namespace LbmLib.Language.Experimental
 			// TODO: Could lazily optimize this with a delegate that accepts as parameters: fixedArguments, parameters.
 			var fixedArgumentCount = FixedArguments.Count;
 			var parameterCount = parameters.Length;
+			var parameterStartIndex = 0;
+			// If this ClosureMethod is the result of a Bind or AsStatic.
+			if (MethodType == ClosureMethodType.BoundInstance)
+			{
+				obj = FixedThisArgument;
+			}
+			else if (MethodType == ClosureMethodType.InstanceAsStatic)
+			{
+				obj = parameters[0];
+				parameterStartIndex++;
+				parameterCount--;
+			}
 			var combinedArguments = new object[fixedArgumentCount + parameterCount];
 			FixedArguments.CopyTo(combinedArguments, 0);
-			parameters.CopyTo(combinedArguments, fixedArgumentCount);
-			var returnValue = OriginalMethod.Invoke(FixedThisArgument ?? obj, invokeAttr, binder, combinedArguments, culture);
+			Array.Copy(parameters, parameterStartIndex, combinedArguments, fixedArgumentCount, parameterCount);
+
+			var returnValue = OriginalMethod.Invoke(obj, invokeAttr, binder, combinedArguments, culture);
+
 			// In case any of the parameters are by-ref, copy back from combinedArguments to parameters.
 			// TODO: Don't need to do this if there are no by-ref parameters.
 			for (var index = 0; index < fixedArgumentCount; index++)
 			{
 				FixedArguments[index] = combinedArguments[index];
 			}
-			Array.Copy(combinedArguments, fixedArgumentCount, parameters, 0, parameterCount);
+			Array.Copy(combinedArguments, fixedArgumentCount, parameters, parameterStartIndex, parameterCount);
+
 			return returnValue;
 		}
 
@@ -252,13 +319,17 @@ namespace LbmLib.Language.Experimental
 		{
 			get
 			{
-				// This is idempotent, so no need for locking.
+				// This is idempotent, so no need for locking. Not using System.Lazy<T> since it requires .NET Framework 4.0+.
+				var methodName = this.methodName;
 				if (methodName is null)
 				{
-					methodName = OriginalMethod.Name + "_" +
-						(FixedThisArgument is null ? "unbound" : ReplaceInvalidNameCharactersWithUnderscores(FixedThisArgument));
+					methodName = OriginalMethod.Name + "_" + MethodType;
+					if (MethodType == ClosureMethodType.BoundInstance)
+						methodName += "_" + ReplaceInvalidNameCharactersWithUnderscores(FixedThisArgument);
 					if (FixedArguments.Count > 0)
 						methodName += "_" + FixedArguments.Select(ReplaceInvalidNameCharactersWithUnderscores).Join("_");
+					// Only assign to field once fully initialized to avoid potentially exposing uninitialized object to other threads.
+					this.methodName = methodName;
 				}
 				return methodName;
 			}
@@ -289,11 +360,34 @@ namespace LbmLib.Language.Experimental
 
 		public override object[] GetCustomAttributes(bool inherit) => OriginalMethod.GetCustomAttributes(inherit);
 
-		public override object[] GetCustomAttributes(Type attributeType, bool inherit) => OriginalMethod.GetCustomAttributes(attributeType, inherit);
+		public override object[] GetCustomAttributes(Type attributeType, bool inherit) =>
+			OriginalMethod.GetCustomAttributes(attributeType, inherit);
 
 		public override MethodImplAttributes GetMethodImplementationFlags() => OriginalMethod.GetMethodImplementationFlags();
 
-		public override ParameterInfo[] GetParameters() => nonFixedParameterInfos;
+		public override ParameterInfo[] GetParameters()
+		{
+			// This is idempotent, so no need for locking. Not using System.Lazy<T> since it requires .NET Framework 4.0+.
+			var nonFixedParameterInfos = this.nonFixedParameterInfos;
+			if (nonFixedParameterInfos is null)
+			{
+				var fixedArgumentCount = FixedArguments.Count;
+				var nonFixedParameterCount = originalParameterInfos.Length - fixedArgumentCount;
+				var prefixParameterCount = MethodType == ClosureMethodType.InstanceAsStatic ? 1 : 0;
+				nonFixedParameterInfos = new ParameterInfo[nonFixedParameterCount + prefixParameterCount];
+				if (prefixParameterCount == 1)
+					nonFixedParameterInfos[fixedArgumentCount] =
+						new SimpleParameterInfo(member: this, position: 0, DeclaringType, name: "$this", defaultValue: null,
+						ParameterAttributes.None);
+				for (var position = 0; position < nonFixedParameterCount; position++)
+					nonFixedParameterInfos[prefixParameterCount + position] =
+						new WrapperParameterInfo(member: this, position: prefixParameterCount + position,
+							originalParameterInfos[fixedArgumentCount + position]);
+				// Only assign to field once fully initialized to avoid potentially exposing uninitialized object to other threads.
+				this.nonFixedParameterInfos = nonFixedParameterInfos;
+			}
+			return nonFixedParameterInfos;
+		}
 
 		public override bool IsDefined(Type attributeType, bool inherit) => OriginalMethod.IsDefined(attributeType, inherit);
 
@@ -312,8 +406,8 @@ namespace LbmLib.Language.Experimental
 				throw new InvalidOperationException(ToString() + " is not a GenericMethodDefinition. " +
 					"MakeGenericMethod may only be called on a method for which MethodBase.IsGenericMethodDefinition is true.");
 			var genericMethod = OriginalMethod.MakeGenericMethod(typeArguments);
-			return new ClosureMethod(genericMethod, methodAttributes, genericMethod.GetParameters().CopyToEnd(FixedArguments.Count),
-				this, FixedThisArgument, FixedArguments);
+			return new ClosureMethod(MethodType, genericMethod, this, methodAttributes, genericMethod.GetParameters(),
+				FixedThisArgument, FixedArguments);
 		}
 
 #if !NET35
@@ -321,10 +415,12 @@ namespace LbmLib.Language.Experimental
 #endif
 		public Delegate CreateDelegate(Type delegateType)
 		{
+			if (delegateType is null)
+				throw new ArgumentNullException(nameof(delegateType));
 			if (!IsStatic || ContainsGenericParameters || !typeof(Delegate).IsAssignableFrom(delegateType))
 				throw new ArgumentException("Cannot bind to the target method because its signature or security transparency is not " +
 					"compatible with that of the delegate type.");
-			return CreateClosureDelegate(delegateType, OriginalMethod, FixedThisArgument, FixedArguments);
+			return CreateClosureDelegate(delegateType, FixedThisArgument);
 		}
 
 #if !NET35
@@ -332,15 +428,31 @@ namespace LbmLib.Language.Experimental
 #endif
 		public Delegate CreateDelegate(Type delegateType, object target)
 		{
-			// To match Delegate.CreateDelegate behavior, allow null target.
-			// For static methods, this is valid.
-			// For bound methods (also a static method), FixedThisArgument will be passed for target.
-			// For instance methods, don't throw ArgumentNullException; let delegate invocation throw a TargetInvocationException.
-			if (ContainsGenericParameters || !typeof(Delegate).IsAssignableFrom(delegateType) ||
-				!(target is null || DeclaringType.IsAssignableFrom(target.GetType())))
+			if (delegateType is null)
+				throw new ArgumentNullException(nameof(delegateType));
+			if (ContainsGenericParameters || !typeof(Delegate).IsAssignableFrom(delegateType))
 				throw new ArgumentException("Cannot bind to the target method because its signature or security transparency is not " +
 					"compatible with that of the delegate type.");
-			return CreateClosureDelegate(delegateType, OriginalMethod, target ?? FixedThisArgument, FixedArguments);
+			// To match Delegate.CreateDelegate behavior, allow null target.
+			// For any type of static ClosureMethod (ClosureMethodType.Static/InstanceAsStatic/BoundInstance), this is valid since target is ignored.
+			// (In the BoundInstance case, FixedThisArgument always supersedes target, even if null.)
+			// For an instance ClosureMethod (ClosureMethodType.Instance), don't throw ArgumentNullException, since method logic may either never use
+			// the instance (i.e. "this" not accessed, whether directly or indirectly) or does use the instance in a null-safe way.
+			// If the method logic does use the instance in a null-unsafe way, it will throw an ArgumentNullException
+			// (wrapped in a TargetInvocationException due to delegate invocation).
+			if (MethodType == ClosureMethodType.Instance)
+			{
+				if (!(target is null || DeclaringType.IsAssignableFrom(target.GetType())))
+					throw new ArgumentException("Cannot bind to the target method because its signature or security transparency is not " +
+						"compatible with that of the delegate type.");
+			}
+			else
+			{
+				// FixedThisArgument is always null if method type is not BoundInstance, which is fine,
+				// since target is ignored for Static and InstanceAsStatic method types.
+				target = FixedThisArgument;
+			}
+			return CreateClosureDelegate(delegateType, target);
 		}
 
 		// For easy access within the delegate dynamic method.
@@ -352,34 +464,19 @@ namespace LbmLib.Language.Experimental
 		static readonly MethodInfo ListOfIRefListOfObjectItemGetMethod = typeof(List<IRefList<object>>).GetProperty("Item").GetGetMethod();
 		static readonly MethodInfo IRefListOfObjectItemGetMethod = typeof(IRefList<object>).GetProperty("Item").GetGetMethod();
 		static readonly MethodInfo IRefListOfObjectGetItemRefMethod = typeof(IRefList<object>).GetMethod(nameof(IRefList<object>.ItemRef));
-		static readonly ConstructorInfo InvalidOperationExceptionConstructor = typeof(InvalidOperationException).GetConstructor(new[] { typeof(string) });
-		static readonly MethodInfo MethodBaseToDebugStringMethod = typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(MethodBase) });
-		static readonly MethodInfo StringFormat2Method = typeof(string).GetMethod(nameof(string.Format), new[] { typeof(string), typeof(object), typeof(object) });
+		static readonly ConstructorInfo InvalidOperationExceptionConstructor =
+			typeof(InvalidOperationException).GetConstructor(new[] { typeof(string) });
+		static readonly MethodInfo MethodBaseToDebugStringMethod =
+			typeof(DebugExtensions).GetMethod(nameof(DebugExtensions.ToDebugString), new[] { typeof(MethodBase) });
+		static readonly MethodInfo StringFormat2Method =
+			typeof(string).GetMethod(nameof(string.Format), new[] { typeof(string), typeof(object), typeof(object) });
 
-		static Delegate CreateClosureDelegate(Type delegateType, MethodInfo method, object fixedThisArgument, IRefList<object> fixedArguments)
+		Delegate CreateClosureDelegate(Type delegateType, object target)
 		{
-			// Since DynamicMethod can only be created as a static method, if method is an instance method (and thus fixedThisArgument is asserted to be non-null)
-			// we will need to prepend the fixed arguments with fixedThisArgument.
-			if (!method.IsStatic)
-			{
-				fixedArguments = fixedArguments.ChainPrepend(fixedThisArgument);
-			}
-
-			var registryKey = Registry.RegisterFixedArguments(fixedArguments);
+			var registryKey = Registry.Register();
 			try
 			{
-#if GENERATE_DEBUG_DLL
-				// XXX: While we could get a built method from DebugDynamicMethodBuilder (via TypeBuilder.GetMethod(methodBuilder.Name, parameterTypes)),
-				// it seems that the using such a built method as a closure owner doesn't work - the built method apparently can become finalizable
-				// (and thus could free the closure fixedArguments) before the delegate created from it is even called.
-				// Workaround is to just use the non-debug DynamicMethodBuilder for both the closure owner and to create the delegate from,
-				// while the DebugDynamicMethodBuilder's only purpose is to save a debug assembly dll.
-				// I also tried just using a dummy DynamicMethod that simply passes through arguments to a TypeBuilder.GetMethod()-built method,
-				// but that still suffered the same premature finalization issue.
-				CreateClosureDynamicMethod(delegateType, method, fixedThisArgument, fixedArguments, registryKey, new DebugDynamicMethodBuilder.Factory());
-#endif
-
-				var dynamicMethod = CreateClosureDynamicMethod(delegateType, method, fixedThisArgument, fixedArguments, registryKey, new DynamicMethodBuilder.Factory());
+				var dynamicMethod = CreateClosureDynamicMethod(target, registryKey);
 				var closureDelegate = dynamicMethod.CreateDelegate(delegateType);
 				// The closure "owner" is not the delegate itself, since if the last usage of the delegate is to call it (and its contained dynamic method),
 				// the delegate object can become finalizable right as its being invoked and hands control over to the dynamic method's contained code.
@@ -392,47 +489,80 @@ namespace LbmLib.Language.Experimental
 				Registry.RegisterClosureOwner(registryKey, closureDelegate.Method);
 				return closureDelegate;
 			}
-			catch (Exception ex)
+			catch (Exception)
 			{
 				// If anything went wrong, deregister the closure, then rethrow the exception.
 				Registry.Deregister(registryKey);
-				throw ex;
+				throw;
 			}
 		}
 
-		static DynamicMethod CreateClosureDynamicMethod(Type delegateType, MethodInfo method, object fixedThisArgument, IRefList<object> fixedArguments,
-			int registryKey, IDynamicMethodBuilderFactory dynamicMethodBuilderFactory)
+		DynamicMethod CreateClosureDynamicMethod(object target, int registryKey)
 		{
-			var isStatic = method.IsStatic;
-			var declaringType = method.DeclaringType;
-			var returnType = method.ReturnType;
-			var parameters = method.GetParameters();
-			// Note: If method isn't static, fixedThisArgument is already prepended to fixedArguments.
-			var fixedArgumentCount = fixedArguments.Count;
-			var prefixArgumentCount = isStatic ? 0 : 1;
-			var nonFixedArgumentCount = parameters.Length - fixedArgumentCount + prefixArgumentCount;
+#if GENERATE_DEBUG_DLL
+			// XXX: While we could get a built method from DebugDynamicMethodBuilder (via TypeBuilder.GetMethod(methodBuilder.Name, parameterTypes)),
+			// it seems that the using such a built method as a closure owner doesn't work - the built method apparently can become finalizable
+			// (and thus could free the closure fixedArguments) before the delegate created from it is even called.
+			// Workaround is to just use the non-debug DynamicMethodBuilder for both the closure owner and to create the delegate from,
+			// while the DebugDynamicMethodBuilder's only purpose is to save a debug assembly dll.
+			// I also tried just using a dummy DynamicMethod that simply passes through arguments to a TypeBuilder.GetMethod()-built method,
+			// but that still suffered the same premature finalization issue.
+			CreateClosureDynamicMethod(target, registryKey, new DebugDynamicMethodBuilder.Factory());
+#endif
 
+			return CreateClosureDynamicMethod(target, registryKey, new DynamicMethodBuilder.Factory());
+		}
+
+		DynamicMethod CreateClosureDynamicMethod(object target, int registryKey, IDynamicMethodBuilderFactory dynamicMethodBuilderFactory)
+		{
+			var methodType = MethodType;
+			var originalMethod = OriginalMethod;
+			var originalMethodIsStatic = originalMethod.IsStatic;
+			var declaringType = originalMethod.DeclaringType;
+			var returnType = originalMethod.ReturnType;
+
+			var nonFixedParameterInfos = GetParameters();
+			var nonFixedArgumentCount = nonFixedParameterInfos.Length;
 			var nonFixedParameterTypes = new Type[nonFixedArgumentCount];
 			for (var index = 0; index < nonFixedArgumentCount; index++)
-				nonFixedParameterTypes[index] = parameters[fixedArgumentCount - prefixArgumentCount + index].ParameterType;
+				nonFixedParameterTypes[index] = nonFixedParameterInfos[index].ParameterType;
 
 			var methodBuilder = dynamicMethodBuilderFactory.Create(
-				method.Name + "_Closure_" + registryKey,
+				originalMethod.Name + "_Closure_" + registryKey,
 				// Some (all?) .NET implementations only accept the following MethodAttributes/CallingConventions for DynamicMethod.
 				MethodAttributes.Public | MethodAttributes.Static,
 				CallingConventions.Standard,
 				declaringType,
 				returnType,
 				nonFixedParameterTypes);
-			for (int index = 0; index < nonFixedArgumentCount; index++)
+			for (var index = 0; index < nonFixedArgumentCount; index++)
 			{
-				var parameter = parameters[fixedArgumentCount - prefixArgumentCount + index];
+				var parameter = nonFixedParameterInfos[index];
 				// DefineParameter(0,...) refers to the return value, so for actual parameters, it's practically 1-based rather than 0-based.
-				methodBuilder.DefineParameter(index + 1, parameter.Attributes, parameter.Name);
+				var parameterBuilder = methodBuilder.DefineParameter(index + 1, parameter.Attributes, parameter.Name);
+				if ((parameter.Attributes & ParameterAttributes.HasDefault) == ParameterAttributes.HasDefault)
+					parameterBuilder.SetConstant(parameter.DefaultValue);
 				// XXX: Do any custom attributes like ParamArrayAttribute need to be copied too?
 				// There's no good generic way to copy attributes as far as I can tell, since CustomAttributeBuilder is very cumbersome to use.
 			}
 			var ilGenerator = methodBuilder.GetILGenerator();
+
+			// Since DynamicMethod can only be created as a static method, if original method is an instance method:
+			// If type is Instance, prepend the closure fixed arguments with target (target passed to CreateDelegate).
+			// If type is BoundInstance, prepend the closure fixed arguments with target (ClosureMethod.FixedThisArgument).
+			// If type is InstanceAsStatic, don't need to prepend anything, since instance is passed as the first argument upon method invocation.
+			// If type is Static, don't need to prepend anything, since there's no instance involved.
+			var prefixArgumentCount = 0;
+			var fixedArguments = FixedArguments;
+			var fixedArgumentCount = fixedArguments.Count;
+			if (methodType == ClosureMethodType.Instance || methodType == ClosureMethodType.BoundInstance)
+			{
+				fixedArguments = fixedArguments.ChainPrepend(target);
+				prefixArgumentCount = 1;
+				fixedArgumentCount++;
+			}
+
+			Registry.RegisterFixedArguments(registryKey, fixedArguments);
 
 			// Create the non-constant fixed arguments that are stored in the closure, and loaded within the dynamic method if needed.
 			var fixedArgumentsVar = default(LocalBuilder);
@@ -468,7 +598,7 @@ namespace LbmLib.Language.Experimental
 #endif
 #endif
 
-				// Emit the code that loads the fixed arguments from ClosureMethod.ClosuresField into a local variable.
+				// Emit the code that loads the fixed arguments from ClosureMethod.FixedArgumentsRegistry into a local variable.
 				fixedArgumentsVar = ilGenerator.DeclareLocal(typeof(IRefList<object>));
 				ilGenerator.Emit(OpCodes.Ldsfld, FixedArgumentsRegistryField);
 				ilGenerator.EmitLdcI4(registryKey);
@@ -500,21 +630,21 @@ namespace LbmLib.Language.Experimental
 
 			// We'll be using a call opcode if the method is either (a) static, OR (b) instance AND the method is non-overrideable.
 			// This latter (b) case includes the situation where the method's declaring type is a value type (since the method would be implicitly sealed),
-			// and fixedThisArgument (which must be of a value type) must be unboxed into an address for the call opcode.
-			// Otherwise, we'll be using a callvirt opcode. If fixedThisArgument is a value type, then the method's declaring type is either
-			// Object/ValueType/Enum or an interface, and fixedThisArgument needs to be boxed.
-			var useCallOpcode = isStatic || !method.IsVirtual || method.IsFinal;
+			// and target (whose type must be the declaring type) must be unboxed into an address for the call opcode.
+			// Otherwise, we'll be using a callvirt opcode. If target is a value type, then the method's declaring type is either
+			// Object/ValueType/Enum or an interface, and target needs to be boxed.
+			var useCallOpcode = originalMethodIsStatic || !originalMethod.IsVirtual || originalMethod.IsFinal;
 
-			// For instance methods, emit the first item in the closure array, which represents the fixedThisArgument.
-			if (!isStatic)
+			switch (methodType)
 			{
-				if (fixedThisArgument is null)
+			// Instance => target passed to CreateDelegate is passed as target to this method.
+			case ClosureMethodType.Instance:
+			// BoundInstance => ClosureMethod.FixedThisArgument is passed as target to this method.
+			case ClosureMethodType.BoundInstance:
+				// Instance, specified as fixedThisArgument, is either hard-coded in as a constant...
+				if (!ilGenerator.TryEmitConstant(target))
 				{
-					// If fixedThisArgument is null, fixedArgumentsVar can be null (implying closure isn't needed), so just ldnull.
-					ilGenerator.Emit(OpCodes.Ldnull);
-				}
-				else
-				{
+					// ... or is the first element of the closure fixed arguments.
 					ilGenerator.EmitLdloc(fixedArgumentsVar);
 					ilGenerator.EmitLdcI4(0);
 					ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
@@ -525,17 +655,28 @@ namespace LbmLib.Language.Experimental
 					}
 					else
 					{
-						// If declaringType is a value type, fixedThisArgument needs to be boxed.
-						// Fortunately, since it's in the closures array, it's already boxed, so we don't need to do anything extra.
+						// If declaringType (the type of the target) is a value type, target needs to be boxed.
+						// Fortunately, since it's in the closure fixedArguments (of type IRefList<object>), it's already boxed,
+						// so we don't need to do anything extra.
 					}
 				}
+				break;
+			case ClosureMethodType.InstanceAsStatic:
+				// Instance is passed as the first argument.
+				ilGenerator.Emit(OpCodes.Ldarg_0);
+				break;
+			case ClosureMethodType.Static:
+				// No instance needs to be loaded first.
+				break;
+			default:
+				throw new NotImplementedException($"Unrecognized ClosureMethodType: {methodType}");
 			}
 
-			// Emit fixed arguments, some that can be hard-coded in as constants, others needing the closure array.
+			// Emit fixed arguments, some that can be hard-coded in as constants, others needing the closure reflist.
 			for (var index = prefixArgumentCount; index < fixedArgumentCount; index++)
 			{
 				var fixedArgument = fixedArguments[index];
-				var fixedArgumentType = parameters[index - prefixArgumentCount].ParameterType;
+				var fixedArgumentType = originalParameterInfos[index - prefixArgumentCount].ParameterType;
 				var fixedArgumentIsByRef = fixedArgumentType.IsByRef;
 				if (fixedArgumentIsByRef || !ilGenerator.TryEmitConstant(fixedArgument))
 				{
@@ -576,7 +717,7 @@ namespace LbmLib.Language.Experimental
 			}
 
 			// Emit call to the original method, using all the arguments pushed to the CIL stack above.
-			ilGenerator.Emit(useCallOpcode ? OpCodes.Call : OpCodes.Callvirt, method);
+			ilGenerator.Emit(useCallOpcode ? OpCodes.Call : OpCodes.Callvirt, originalMethod);
 
 			// Emit return. Note that if returning a value type, boxing the return value isn't needed
 			// since the method return type would be a value type in this case (rather than object).
@@ -687,6 +828,117 @@ namespace LbmLib.Language.Experimental
 				// Return value won't be used, so just return a dummy null.
 				return null;
 			}
+		}
+	}
+
+	class WrapperParameterInfo : ParameterInfo
+	{
+		readonly ParameterInfo parameter;
+
+		internal WrapperParameterInfo(MemberInfo member, int position, ParameterInfo parameter)
+		{
+			this.parameter = parameter;
+			// Reusing MemberImpl and PositionImpl legacy protected fields instead of defining our own private fields for them.
+			// These aren't guaranteed to be used in the ParameterInfo implementations of the corresponding public properties,
+			// so we'll have to also override those to explicitly defer to these protected fields.
+			MemberImpl = member;
+			PositionImpl = position;
+		}
+
+		public override MemberInfo Member => MemberImpl;
+
+		public override int Position => PositionImpl;
+
+		public override Type ParameterType => parameter.ParameterType;
+
+		public override string Name => parameter.Name;
+
+		public override object DefaultValue => parameter.DefaultValue;
+
+		public override object RawDefaultValue => parameter.RawDefaultValue;
+
+		public override ParameterAttributes Attributes => parameter.Attributes;
+
+#if !NET35
+		public override bool HasDefaultValue => parameter.HasDefaultValue;
+
+		public override int MetadataToken => parameter.MetadataToken;
+
+		public override IEnumerable<CustomAttributeData> CustomAttributes => parameter.CustomAttributes;
+#endif
+
+		public override object[] GetCustomAttributes(bool inherit) => parameter.GetCustomAttributes(inherit);
+
+		public override object[] GetCustomAttributes(Type attributeType, bool inherit) => parameter.GetCustomAttributes(attributeType, inherit);
+
+		public override Type[] GetOptionalCustomModifiers() => parameter.GetOptionalCustomModifiers();
+
+		public override Type[] GetRequiredCustomModifiers() => parameter.GetRequiredCustomModifiers();
+
+		public override bool IsDefined(Type attributeType, bool inherit) => parameter.IsDefined(attributeType, inherit);
+
+		public override string ToString() => parameter.ToString();
+	}
+
+	class SimpleParameterInfo : ParameterInfo
+	{
+		internal SimpleParameterInfo(MemberInfo member, int position, Type parameterType, string name, object defaultValue,
+			ParameterAttributes attributes)
+		{
+			// Reusing legacy protected fields instead of defining our own private fields for them.
+			// These aren't guaranteed to be used in the ParameterInfo implementations of the corresponding public properties,
+			// so we'll have to also override those to explicitly defer to these protected fields.
+			MemberImpl = member;
+			PositionImpl = position;
+			ClassImpl = parameterType;
+			NameImpl = name;
+			DefaultValueImpl = defaultValue;
+			AttrsImpl = attributes;
+		}
+
+		public override MemberInfo Member => MemberImpl;
+
+		public override int Position => PositionImpl;
+
+		public override Type ParameterType => ClassImpl;
+
+		public override string Name => NameImpl;
+
+		public override object DefaultValue => DefaultValueImpl;
+
+		public override object RawDefaultValue => DefaultValueImpl;
+
+		public override ParameterAttributes Attributes => AttrsImpl;
+
+#if !NET35
+		public override bool HasDefaultValue => (AttrsImpl & ParameterAttributes.HasDefault) == ParameterAttributes.HasDefault;
+
+		public override int MetadataToken => MemberImpl.MetadataToken;
+
+		public override IEnumerable<CustomAttributeData> CustomAttributes => Enumerable.Empty<CustomAttributeData>();
+#endif
+
+		public override object[] GetCustomAttributes(bool inherit) => new object[0];
+
+		public override object[] GetCustomAttributes(Type attributeType, bool inherit) => new object[0];
+
+		public override Type[] GetOptionalCustomModifiers() => Type.EmptyTypes;
+
+		public override Type[] GetRequiredCustomModifiers() => Type.EmptyTypes;
+
+		public override bool IsDefined(Type attributeType, bool inherit) => false;
+
+		public override string ToString()
+		{
+			// Based off mono's ParameterInfo.ToString code.
+			var type = ClassImpl;
+			while (type.HasElementType)
+				type = type.GetElementType();
+			var useFullName = !type.IsPrimitive && ClassImpl != typeof(void) && !(ClassImpl.Namespace == MemberImpl.DeclaringType.Namespace);
+			var text = useFullName ? ClassImpl.FullName : ClassImpl.Name;
+			if (!IsRetval)
+				text += ' ' + NameImpl;
+			return text;
 		}
 	}
 }

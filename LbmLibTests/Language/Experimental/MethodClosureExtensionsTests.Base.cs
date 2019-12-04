@@ -47,16 +47,6 @@ namespace LbmLib.Language.Experimental.Tests
 		public override int GetHashCode() => -1830369473 + X.GetHashCode();
 
 		public override string ToString() => $"TestClass{{{X}}}";
-
-		public static bool operator ==(TestClass left, TestClass right)
-		{
-			return left is null ? right is null : left.Equals(right);
-		}
-
-		public static bool operator !=(TestClass left, TestClass right)
-		{
-			return !(left == right);
-		}
 	}
 
 	public class MethodClosureExtensionsBase
@@ -118,26 +108,47 @@ namespace LbmLib.Language.Experimental.Tests
 				this.childFilter = childFilter;
 			}
 
+			// This is both a convenient way to use the fixture, and a workaround for the issue where local variables in a method
+			// are not finalizable after last usage in DEBUG builds (ostensibly so that the debugger still has access to them).
+			// The workaround is to ensure the main body of the test method is in its own "local" method via delegate.
+			public static void Do(Action<MethodClosureExtensionsFixture> action)
+			{
+				using (var fixture = new MethodClosureExtensionsFixture())
+					action(fixture);
+			}
+
 			public static bool IsRunningOnMono { get; } = !(Type.GetType("Mono.Runtime") is null);
 
 			public void Dispose()
 			{
-				// As this is called at the end of the test method, any variable (in)directly holding a finalizable object (such as closure owners)
-				// should now have those objects be detected as finalizable. Thus, assert an empty closure registry.
-				// Exception: Mono runtime apparently isn't as aggressive with this detection and still doesn't see such objects as finalizable
-				// until after the method ends, so don't assert an empty closure registry in this case.
-				if (!IsRunningOnMono)
-					AssertClosureRegistryCountAfterFullGCFinalization(0, "after test: " + TestContext.CurrentContext.Test.FullName);
-
-				loggingWithDisposable.Dispose();
-				if (!childFilter)
+				var gcErrored = false;
+				try
 				{
-					lock (ActualLogs)
+					// As this is called at the end of the test method, any variable (in)directly holding a finalizable object (such as closure owners)
+					// should now have those objects be detected as finalizable. Thus, assert an empty closure registry.
+					// Exception: Mono runtime apparently isn't as aggressive with this detection and still doesn't see such objects as finalizable
+					// until after the method ends, so don't assert an empty closure registry in this case.
+					if (!childFilter && !IsRunningOnMono)
+						AssertClosureRegistryCountAfterFullGCFinalization(0, "after test & final GC: " + TestContext.CurrentContext.Test.FullName);
+				}
+				catch (Exception)
+				{
+					gcErrored = true;
+					throw;
+				}
+				finally
+				{
+					loggingWithDisposable.Dispose();
+					if (!childFilter)
 					{
-						Logging.Log(ActualLogs.Join("\n\t"), "ActualLogs");
-						if (!(ExpectedLogs is null))
-							CollectionAssert.AreEqual(ExpectedLogs, ActualLogs.Where(log => !log.StartsWith("DEBUG")));
+						lock (ActualLogs)
+						{
+							Logging.Log(ActualLogs.Join("\n\t"), "ActualLogs");
+							if (!gcErrored && !(ExpectedLogs is null))
+								CollectionAssert.AreEqual(ExpectedLogs, ActualLogs.Where(log => !log.StartsWith("DEBUG")));
+						}
 					}
+					//Logging.Log("Finished MethodClosureExtensionsFixture.Dispose for test: " + TestContext.CurrentContext.Test.FullName);
 				}
 			}
 
@@ -186,10 +197,10 @@ namespace LbmLib.Language.Experimental.Tests
 								logLabel + " MinimumFreeRegistryKey");
 						//Logging.Log($"DEBUG {logLabel}:\n{ClosureMethod.Registry}");
 					}
-					catch (Exception ex)
+					catch (Exception)
 					{
 						Logging.Log($"DEBUG {logLabel}:\n{ClosureMethod.Registry}");
-						throw ex;
+						throw;
 					}
 				}
 			}
