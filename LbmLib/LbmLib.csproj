@@ -19,6 +19,9 @@
     <OutputPath>..\dist\</OutputPath>
     <DefineConstants />
   </PropertyGroup>
+  <PropertyGroup Condition=" $(MSBuildRuntimeType) == 'Mono' ">
+    <DefineConstants>MONO</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="1.2.0.1" ExcludeAssets="runtime" />
   </ItemGroup>

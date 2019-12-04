@@ -42,7 +42,7 @@ namespace LbmLib.Language.Experimental.Tests
 				partialAppliedDelegate2(null, new List<string>() { "qwerty" }, 40L, ref x);
 				Assert.AreEqual(20 * 20 * 20 * 20, x);
 				//Logging.Log($"DEBUG before final GC:\n{ClosureMethod.Registry}");
-				// MethodClosureExtensionsFixture's Dispose will call AssertEmptyClosureRegistryAfterTryFullGCFinalization a final time, so don't need to call it here.
+				// MethodClosureExtensionsFixture will call AssertEmptyClosureRegistryAfterTryFullGCFinalization a final time, so don't need to call it here.
 			});
 		}
 
@@ -53,9 +53,11 @@ namespace LbmLib.Language.Experimental.Tests
 			var threadCount = 10;
 			var delegatePerThreadCount = 10;
 			var delegatePerThreadGCInterval = 5;
+
 			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				fixture.AssertClosureRegistryCountAfterFullGCFinalization(0, "after initial GC");
+
 				var method = typeof(MethodClosureExtensionsTestsFancy).GetMethod(nameof(MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod));
 				var partialAppliedMethod = method.PartialApply("hello", "world", new TestStruct(10), new TestStruct(15), 20, 25, new TestClass(30), new TestClass(35));
 
@@ -68,7 +70,7 @@ namespace LbmLib.Language.Experimental.Tests
 					// Need a copy of the iteration variable for usage within the thread, since direct access to it is effectively by-ref,
 					// such that within the threads, it would only see it as its final value (threadCount).
 					var threadIndex = j;
-					threads[threadIndex] = new Thread(() =>
+					var thread = new Thread(() =>
 					{
 						// Wait until all threads are started (threadStartResetEvent.Set() is called in the main thread once all threads are started).
 						//Logging.Log($"DEBUG thread {threadIndex} init");
@@ -79,39 +81,41 @@ namespace LbmLib.Language.Experimental.Tests
 						{
 							for (var i = 0; i < delegatePerThreadCount; i++)
 							{
-								// This one-off Action ensures that any (implicit) local variables within its body are finalizable afterwards.
+								// This local function ensures that any (implicit) local variables within its body are finalizable afterwards.
 								// This is a workaround for the issue where local variables in a method are not finalizable after last usage in DEBUG builds.
-								((Action)(() =>
+								void CreateTestDelegate()
 								{
-									if (gcAtIntervals)
-									{
-										lock (fixture.GCSync)
-										{
-											partialAppliedDelegatePerThread[threadIndex] =
-												partialAppliedMethod.CreateDelegate<MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod_PartialApply_Delegate>();
-										}
-									}
-									else
-									{
-										partialAppliedDelegatePerThread[threadIndex] =
-											partialAppliedMethod.CreateDelegate<MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod_PartialApply_Delegate>();
-									}
+									// Note: CreateDelegate has to go within the lock (if locking is needed), since it modifies the closure registry.
+									partialAppliedDelegatePerThread[threadIndex] =
+										partialAppliedMethod.CreateDelegate<MethodClosureExtensionsTestsFancy.FancyStaticNonVoidMethod_PartialApply_Delegate>();
 									if (i % delegatePerThreadGCInterval == 0)
 									{
 										// Test that the partially applied method delegate still works in this thread.
+										//Logging.Log($"DEBUG before delegate call {i / delegatePerThreadGCInterval} in thread {threadIndex}");
 										var x = threadIndex * i;
 										partialAppliedDelegatePerThread[threadIndex](null, new List<string>() { "qwerty" }, x, ref x);
 										Assert.AreEqual(threadIndex * i * threadIndex * i, x);
 									}
-								}))();
+								}
+								if (gcAtIntervals)
+								{
+									lock (fixture.GCSync)
+										CreateTestDelegate();
+								}
+								else
+								{
+									CreateTestDelegate();
+								}
+
 								if (i % delegatePerThreadGCInterval == 0 && gcAtIntervals)
 								{
 									lock (fixture.GCSync)
 									{
 										Logging.Log($"DEBUG before GC {i / delegatePerThreadGCInterval} in thread {threadIndex}:\n{ClosureMethod.Registry}");
-										fixture.AssertClosureRegistryCountAfterFullGCFinalization(
-											partialAppliedDelegatePerThread.Where(@delegate => !(@delegate is null)).Count(),
-											$"after GC {i / delegatePerThreadGCInterval} in thread {threadIndex}");
+										var delegateCount = partialAppliedDelegatePerThread.Where(@delegate => !(@delegate is null)).Count();
+										var logLabel = $"after GC {i / delegatePerThreadGCInterval} in thread {threadIndex}";
+										Assert.Greater(delegateCount, 0, logLabel);
+										fixture.AssertClosureRegistryCountAfterFullGCFinalization(delegateCount, logLabel);
 									}
 								}
 							}
@@ -127,9 +131,23 @@ namespace LbmLib.Language.Experimental.Tests
 							Logging.Log($"DEBUG thread {threadIndex} finished");
 						}
 					});
-				}
-				foreach (var thread in threads)
+					threads[threadIndex] = thread;
 					thread.Start();
+				}
+
+				var timeoutThread = new Thread(() =>
+				{
+					var timeout = TimeSpan.FromSeconds(20);
+					Thread.Sleep(timeout);
+					Logging.Log($"DEBUG timeout after {timeout.Seconds} seconds - aborting all test threads");
+					foreach (var thread in threads)
+					{
+						if (thread.IsAlive)
+							thread.Abort();
+					}
+				});
+				timeoutThread.Start();
+
 				threadStartResetEvent.Set();
 				foreach (var thread in threads)
 					thread.Join();
@@ -147,22 +165,24 @@ namespace LbmLib.Language.Experimental.Tests
 				lock (fixture.GCSync)
 				{
 					//Logging.Log($"DEBUG before GC after all threads joined:\n{ClosureMethod.Registry}");
-					fixture.AssertClosureRegistryCountAfterFullGCFinalization(
-						threadCount,
-						"after GC after all threads joined");
+					fixture.AssertClosureRegistryCountAfterFullGCFinalization(threadCount, "after GC after all threads joined");
 				}
 
 				for (var threadIndex = 0; threadIndex < threadCount; threadIndex++)
 				{
 					// Test that the latest partially applied method delegate still works.
+					//Logging.Log($"DEBUG before final delegate call created in thread {threadIndex} and called in main thread");
 					var x = threadIndex;
 					partialAppliedDelegatePerThread[threadIndex](null, new List<string>() { "qwerty" }, 40L, ref x);
 					Assert.AreEqual(threadIndex * threadIndex, x);
+					// TODO: Why is this now necessary? Shouldn't partialAppliedDelegatePerThread going out of scope be sufficient?
+					partialAppliedDelegatePerThread[threadIndex] = null;
 				}
 				//lock (fixture.GCSync)
 				//{
 				//	Logging.Log($"DEBUG before final GC:\n{ClosureMethod.Registry}");
-				//	// MethodClosureExtensionsFixture's Dispose will call AssertEmptyClosureRegistryAfterTryFullGCFinalization a final time, so don't need to call it here.
+				//	// MethodClosureExtensionsFixture will call AssertEmptyClosureRegistryAfterTryFullGCFinalization a final time,
+				//	// so don't need to call it here.
 				//}
 			});
 		}

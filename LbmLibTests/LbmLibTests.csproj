@@ -18,6 +18,9 @@
     <DebugType>pdbonly</DebugType>
     <DefineConstants />
   </PropertyGroup>
+  <PropertyGroup Condition=" $(MSBuildRuntimeType) == 'Mono' ">
+    <DefineConstants>MONO</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\LbmLib\LbmLib.csproj" />
   </ItemGroup>

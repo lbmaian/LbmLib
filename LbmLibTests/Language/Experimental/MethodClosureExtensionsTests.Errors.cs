@@ -67,6 +67,10 @@ namespace LbmLib.Language.Experimental.Tests
 		public void Control_StructInstanceMethod_Error(string methodName,
 			Type validDelegateType, Type invalidDelegateType, bool nullTargetDelegateIsException)
 		{
+			// On Mono runtime, MethodInfo.CreateDelegate(validDelegateType, null).DynamicInvoke(...) always throws TargetException,
+			// regardless of whether the this instance is never used.
+			if (DebugExtensions.IsRunningOnMono)
+				nullTargetDelegateIsException = true;
 			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var v = new TestStruct(15);
@@ -132,6 +136,10 @@ namespace LbmLib.Language.Experimental.Tests
 		public void Control_ClassInstanceMethod_Error(string methodName,
 			Type validDelegateType, Type invalidDelegateType, bool nullTargetDelegateIsException)
 		{
+			// On Mono runtime, MethodInfo.CreateDelegate(validDelegateType, null).DynamicInvoke(...) always throws TargetException,
+			// regardless of whether the this instance is never used or is used in a null-safe way.
+			if (DebugExtensions.IsRunningOnMono)
+				nullTargetDelegateIsException = true;
 			MethodClosureExtensionsFixture.Do(fixture =>
 			{
 				var c = new TestClassSimple(15);
@@ -415,13 +423,13 @@ namespace LbmLib.Language.Experimental.Tests
 			}
 			else
 			{
-				using (fixture.DebugOnlyFilter())
+				fixture.WithDebugOnlyFilter(() =>
 				{
 					// Verify that validSampleArgs is, well, valid.
 					method.Invoke(null, validSampleArgs);
 					// Invocation target is ignored for static methods.
 					method.Invoke(this, validSampleArgs);
-				}
+				});
 			}
 			if (delegateDynamicInvokeIsAlwaysException)
 			{
@@ -432,13 +440,13 @@ namespace LbmLib.Language.Experimental.Tests
 			}
 			else
 			{
-				using (fixture.DebugOnlyFilter())
+				fixture.WithDebugOnlyFilter(() =>
 				{
 					// Verify that validDelegateType is indeed valid.
 					method.CreateDelegate(validDelegateType).DynamicInvoke(validSampleArgs);
 					// null is valid target for static method CreateDelegate.
 					method.CreateDelegate(validDelegateType, null).DynamicInvoke(validSampleArgs);
-				}
+				});
 			}
 			if (validSampleArgs.Length > 0)
 			{
@@ -473,12 +481,12 @@ namespace LbmLib.Language.Experimental.Tests
 			object[] validSampleArgs, object[] invalidSampleArgs,
 			bool nullTargetDelegateIsException)
 		{
-			using (fixture.DebugOnlyFilter())
+			fixture.WithDebugOnlyFilter(() =>
 			{
 				// Verify that validDelegateType and validSampleArgs are, well, valid.
 				method.Invoke(instance, validSampleArgs);
 				method.CreateDelegate(validDelegateType, instance).DynamicInvoke(validSampleArgs);
-			}
+			});
 			// Instance method cannot be invoked without a target.
 			Assert.Throws(typeof(TargetException), () => method.Invoke(null, validSampleArgs));
 			// Instance method cannot be invoked with an invalid target.
@@ -509,8 +517,9 @@ namespace LbmLib.Language.Experimental.Tests
 			Assert.Throws(typeof(ArgumentNullException), () => method.CreateDelegate(null, null));
 			Assert.Throws(typeof(ArgumentNullException), () => method.CreateDelegate(null, instance));
 			// CreateDelegate(delegateType, null) doesn't throw error, but invocation of the resulting delegate results is invalid.
-			// Note: On Mono runtime, TargetException will be thrown by MethodInfo.CreateDelegate.
-			// In all other cases (MethodInfo.CreateDelegate on MS .NET runtime, ClosureMethod.CreateDelegate), TargetInvocationException will be thrown.
+			// Note: On Mono runtime, TargetException will be thrown by MethodInfo.CreateDelegate(validDelegateType, null).DynamicInvoke(...).
+			// In all other cases (MethodInfo.CreateDelegate on MS .NET runtime, ClosureMethod.CreateDelegate)(validDelegateType, null).DynamicInvoke(...),
+			// TargetInvocationException will be thrown.
 			var nullBoundDelegate = method.CreateDelegate(validDelegateType, null);
 			if (nullTargetDelegateIsException)
 				AssertThrowsOneOfTwoExceptions<TargetInvocationException, TargetException>(() => nullBoundDelegate.DynamicInvoke(validSampleArgs));

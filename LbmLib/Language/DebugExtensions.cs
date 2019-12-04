@@ -340,13 +340,14 @@ namespace LbmLib.Language
 
 #if !NET35
 		public static string ToDebugString<K, V>(this ConditionalWeakTable<K, V> weakTable, string delimiter = ", ", bool includeEnumerableTypeBraces = true)
-			where K : class
-			where V : class
+			where K : class where V : class
 		{
 			if (weakTable is null)
 				return "null";
-			// .NET Core 2+ and .NET Standard 2.1+ has ConditionalWeakTable implement IEnumerable.
-			if (weakTable is IEnumerable enumerable)
+			// .NET Core 2+ and .NET Standard 2.1+ has ConditionalWeakTable implement IEnumerable<KeyValuePair<K, V>>.
+			// Note: Don't use non-generic IEnumerable here, since mono's ConditionalWeakTable apparently implements it in a way
+			// that results in a relatively opaque ToDebugString().
+			if (weakTable is IEnumerable<KeyValuePair<K, V>> enumerable)
 				return enumerable.ToDebugString(delimiter, includeEnumerableTypeBraces);
 			var bindingFlags = BindingFlags.Instance | BindingFlags.NonPublic;
 			var weakTableKeysGetMethod = typeof(ConditionalWeakTable<K, V>).GetProperty("Keys", bindingFlags).GetGetMethod(true);
@@ -534,8 +535,27 @@ namespace LbmLib.Language
 
 		public static string ToDebugString(this MethodBase method, bool includeNamespace, bool includeDeclaringType)
 		{
-			return method is null ? "null" :
-				(method.IsStatic ? "static " : "") +
+			if (method is null)
+				return "null";
+			// Mono's DynamicMethod implementation throws NotSupportedException for several reflection APIs, so we have to fetch the
+			// "compiled" version of the DynamicMethod for this purpose.
+			// XXX: An earlier implementation tried to use dynamicMethod.CreateDelegate(delegateType).Method,
+			// but that could cause inexplicable crashes in Mono during reflection.
+			// Apparently the RuntimeMethodInfo that Delegate.Method refers to could hold some sort of invalid function pointer or invalid metadata
+			// (I'm not sure of the details).
+			var methodType = method.GetType();
+			if (methodType == typeof(System.Reflection.Emit.DynamicMethod) && IsRunningOnMono)
+			{
+				var methodHandle = method.MethodHandle;
+				if (methodHandle.Value == IntPtr.Zero)
+				{
+					var createDynMethod = methodType.GetMethod("CreateDynMethod", BindingFlags.Instance | BindingFlags.NonPublic);
+					createDynMethod.Invoke(method, new object[0]);
+					methodHandle = method.MethodHandle;
+				}
+				return MethodBase.GetMethodFromHandle(methodHandle).ToDebugString(includeNamespace, includeDeclaringType);
+			}
+			return (method.IsStatic ? "static " : "") +
 				(method is MethodInfo methodInfo ? methodInfo.ReturnType.ToDebugString(includeNamespace, includeDeclaringType) : "void") + " " +
 				(includeDeclaringType && !(method.DeclaringType is null) ? method.DeclaringType.ToDebugString(includeNamespace, includeDeclaringType) + ":" : "") +
 				CSCProvider.CreateEscapedIdentifier(method.Name) +
@@ -570,5 +590,7 @@ namespace LbmLib.Language
 		{
 			return "GCHandle{" + (!gcHandle.IsAllocated ? "unallocated" : gcHandle.Target.ToDebugString()) + "} @" + gcHandle.GetHashCode();
 		}
+
+		public static bool IsRunningOnMono { get; } = !(Type.GetType("Mono.Runtime") is null);
 	}
 }

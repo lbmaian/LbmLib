@@ -1,5 +1,6 @@
 ﻿//#define GENERATE_DEBUG_DLL
 //#define GENERATE_DEBUG_LOGGING
+//#define GENERATE_DEBUG_REGISTRY_LOGGING
 //#define GENERATE_DEBUG_AGGRESSIVE_GC
 
 using System;
@@ -84,6 +85,9 @@ namespace LbmLib.Language.Experimental
 			FixedArguments = fixedArguments;
 		}
 
+		// Array.Empty<object>() is only available in .NET Framework 4.6+ and .NET Core.
+		internal static readonly object[] EmptyObjectArray = new object[0];
+
 		internal static readonly ClosureRegistry Registry = new ClosureRegistry();
 
 		internal class ClosureRegistry
@@ -129,33 +133,56 @@ namespace LbmLib.Language.Experimental
 					registryKey = closureCount;
 				}
 			End:
-#if GENERATE_DEBUG_LOGGING
-				Logging.Log($"DEBUG Register() => registryKey={registryKey}");
+#if GENERATE_DEBUG_REGISTRY_LOGGING
+				Logging.Log($"DEBUG ClosureRegistry.Register() => registryKey={registryKey}");
 #endif
 				return registryKey;
 			}
 
-			public int RegisterFixedArguments(int registryKey, IRefList<object> fixedArguments)
+			public void RegisterFixedArguments(int registryKey, IRefList<object> fixedArguments)
 			{
-				FixedArgumentsRegistry[registryKey] = fixedArguments;
-#if GENERATE_DEBUG_LOGGING
-				Logging.Log($"DEBUG RegisterFixedArguments(registryKey={registryKey}, fixedArguments={fixedArguments.ToDebugString()})");
+				lock (this)
+				{
+					// Optimization: Don't register empty closures.
+					// XXX: This also helps prevent odd edge case, at least on the Mono runtime on .NET Framework 4.7.2 in unit tests
+					// (see MethodClosureExtensionsFixture.AssertClosureRegistryCountAfterFullGCFinalization), where it seems that very small dynamic
+					// methods (e.g. one that only needs to call a static void parameter-less method with empty closure) can somehow not be listed in
+					// ConditionalWeakTable.Keys, and thus the corresponding DeregisterUponFinalize is not Dispose'd in the DeregisterAll call,
+					// and thus the empty closure is not deregistered (at least by the time of the assertion checks).
+					// This is potentially due to the dynamic method no longer becoming reachable and thus the corresponding ephemeron in the
+					// ConditionalWeakTable is removed, although the DeregisterUponFinalize finalizer apparently not firing despite the multiple forced
+					// GCs AssertClosureRegistryCountAfterFullGCFinalization calls that hypothesis into question.
+					// I don't really know what's causing that issue, but simply not storing empty closures helps avoid that headache.
+					if (fixedArguments.Count == 0)
+					{
+						// Need to revert the changes done in Register().
+						FixedArgumentsRegistry[registryKey] = null;
+						if (MinimumFreeRegistryKey > registryKey)
+							MinimumFreeRegistryKey = registryKey;
+						return;
+					}
+					FixedArgumentsRegistry[registryKey] = fixedArguments;
+				}
+#if GENERATE_DEBUG_REGISTRY_LOGGING
+				Logging.Log($"DEBUG ClosureRegistry.RegisterFixedArguments(registryKey={registryKey}, fixedArguments={fixedArguments.ToDebugString()})");
 #endif
-				return registryKey;
 			}
 
 			public void RegisterClosureOwner(int registryKey, object closureOwner)
 			{
 				lock (this)
 				{
+					// Optimization: Empty closures aren't registered, so don't register closure owner in this case.
+					if (FixedArgumentsRegistry[registryKey] is null)
+						return;
 #if NET35
 					OwnerWeakReferenceRegistry[registryKey] = new WeakReference(closureOwner);
 #else
 					OwnerWeakReferenceRegistry.Add(closureOwner, new DeregisterUponFinalize(registryKey));
 #endif
 				}
-#if GENERATE_DEBUG_LOGGING
-				Logging.Log($"DEBUG RegisterClosureOwner(registryKey={registryKey}, closureOwner={closureOwner.ToDebugString()})");
+#if GENERATE_DEBUG_REGISTRY_LOGGING
+				Logging.Log($"DEBUG ClosureRegistry.RegisterClosureOwner(registryKey={registryKey}, closureOwner={closureOwner.ToDebugString()})");
 #endif
 #if NET35
 				GCMonitor.EnsureStarted();
@@ -173,9 +200,47 @@ namespace LbmLib.Language.Experimental
 					OwnerWeakReferenceRegistry[registryKey] = null;
 #endif
 				}
-#if GENERATE_DEBUG_LOGGING
-				Logging.Log($"DEBUG Deregister(registryKey={registryKey}) => minimumFreeRegistryKey={MinimumFreeRegistryKey}");
+#if GENERATE_DEBUG_REGISTRY_LOGGING
+				Logging.Log($"DEBUG ClosureRegistry.Deregister(registryKey={registryKey}) => minimumFreeRegistryKey={MinimumFreeRegistryKey}");
 #endif
+			}
+
+#if !NET35
+			// .NET Core 2.0+ has ConditionalWeakTable.Clear become public. Before that, it's internal.
+			static readonly MethodInfo weakTableClearMethod = typeof(ConditionalWeakTable<object, DeregisterUponFinalize>)
+				.GetMethod("Clear", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+			// .NET Core 2.0+ has ConditionalWeakTable.GetEnumerator() but there's no direct equivalent before that.
+			// So just use its internal Values property.
+			static readonly MethodInfo weakTableValuesGetMethod = typeof(ConditionalWeakTable<object, DeregisterUponFinalize>)
+				.GetProperty("Values", BindingFlags.Instance | BindingFlags.NonPublic).GetGetMethod(true);
+#endif
+
+			internal void DeregisterAll(bool finalizedOnly)
+			{
+#if GENERATE_DEBUG_REGISTRY_LOGGING
+				Logging.Log($"DEBUG ClosureRegistry.DeregisterAll(finalizedOnly: {finalizedOnly.ToDebugString()})");
+#endif
+				lock (this)
+				{
+#if NET35
+					var closureCount = FixedArgumentsRegistry.Count;
+					for (var registryKey = 0; registryKey < closureCount; registryKey++)
+					{
+						if (!(FixedArgumentsRegistry[registryKey] is null) && (!finalizedOnly || !OwnerWeakReferenceRegistry[registryKey].IsAlive))
+						{
+							Deregister(registryKey);
+						}
+					}
+#else
+					// For .NET Framework 4.0+, this method should never be called with true finalizedOnly.
+					if (finalizedOnly)
+						throw new NotSupportedException();
+					var deregisterUponFinalizes = (ICollection<DeregisterUponFinalize>)weakTableValuesGetMethod.Invoke(OwnerWeakReferenceRegistry, EmptyObjectArray);
+					foreach (var deregisterUponFinalize in deregisterUponFinalizes)
+						deregisterUponFinalize.Dispose();
+					weakTableClearMethod.Invoke(OwnerWeakReferenceRegistry, EmptyObjectArray);
+#endif
+				}
 			}
 
 #if NET35
@@ -201,23 +266,7 @@ namespace LbmLib.Language.Experimental
 				{
 					try
 					{
-#if GENERATE_DEBUG_LOGGING
-						Logging.Log("DEBUG ~GCMonitor()");
-#endif
-						lock (Registry)
-						{
-							// TODO: There should be a max key optimization in case the lists grow fairly large.
-							var fixedArgumentsRegistry = Registry.FixedArgumentsRegistry;
-							var ownerWeakReferencesRegistry = Registry.OwnerWeakReferenceRegistry;
-							var closureCount = fixedArgumentsRegistry.Count;
-							for (var registryKey = 0; registryKey < closureCount; registryKey++)
-							{
-								if (!(fixedArgumentsRegistry[registryKey] is null) && !ownerWeakReferencesRegistry[registryKey].IsAlive)
-								{
-									Registry.Deregister(registryKey);
-								}
-							}
-						}
+						Registry.DeregisterAll(finalizedOnly: true);
 					}
 					finally
 					{
@@ -227,21 +276,28 @@ namespace LbmLib.Language.Experimental
 				}
 			}
 #else
-			sealed class DeregisterUponFinalize
+			sealed class DeregisterUponFinalize : IDisposable
 			{
 				readonly int registryKey;
+				bool disposed = false;
 
-				internal DeregisterUponFinalize(int registryKey)
-				{
-					this.registryKey = registryKey;
-				}
+				internal DeregisterUponFinalize(int registryKey) => this.registryKey = registryKey;
 
-				~DeregisterUponFinalize()
+				~DeregisterUponFinalize() => Dispose(false);
+
+				public void Dispose() => Dispose(true);
+
+				void Dispose(bool disposing)
 				{
+					if (disposed)
+						return;
 					Registry.Deregister(registryKey);
+					disposed = true;
+					if (disposing)
+						GC.SuppressFinalize(this);
 				}
 
-				public override string ToString() => $"DeregisterUponFinalize{{{registryKey}}}";
+				public override string ToString() => $"ClosureRegistry.DeregisterUponFinalize{{{registryKey}}}";
 			}
 #endif
 
@@ -482,11 +538,14 @@ namespace LbmLib.Language.Experimental
 				// the delegate object can become finalizable right as its being invoked and hands control over to the dynamic method's contained code.
 				// The dynamic method itself doesn't seem to be finalizable during execution of its contained code
 				// (or at least to the point that the fixedArguments are loaded in it).
-				// Little trick: Using the dynamicMethod.CreateDelegate(delegateType).Method instead of dynamicMethod itself,
-				// since the former is typically the internal "compiled" version of the dynamic method, and thus shouldn't have issues with being used for
-				// reflection purposes (DynamicMethod can sometimes throw NotSupportedException for certain reflection APIs),
-				// which could matter for ClosureRegistry.ToString().
-				Registry.RegisterClosureOwner(registryKey, closureDelegate.Method);
+				// Note: ClosureRegistry.ToString() will need to use reflection APIs on this dynamic method,
+				// and Mono's DynamicMethod can sometimes throw NotSupportedException for certain reflection APIs.
+				// This problem is handled in DebugExtension.ToDebugString(this MethodBase method).
+				// XXX: An earlier implementation tried to use dynamicMethod.CreateDelegate(delegateType).Method,
+				// but that could cause inexplicable crashes in Mono during reflection.
+				// Apparently the RuntimeMethodInfo that Delegate.Method refers to could hold some sort of invalid function pointer or invalid metadata
+				// (I'm not sure of the details).
+				Registry.RegisterClosureOwner(registryKey, dynamicMethod);
 				return closureDelegate;
 			}
 			catch (Exception)
@@ -583,8 +642,7 @@ namespace LbmLib.Language.Experimental
 				// This isn't fool-proof and is probably overkill, but it should suffice for testing purposes.
 				for (var gcIter = 0; gcIter < 3; gcIter++)
 				{
-					ilGenerator.Emit(OpCodes.Ldc_I4_2);
-					ilGenerator.Emit(OpCodes.Call, typeof(GC).GetMethod(nameof(GC.Collect), new[] { typeof(int) }));
+					ilGenerator.Emit(OpCodes.Call, typeof(GC).GetMethod(nameof(GC.Collect), Type.EmptyTypes));
 					ilGenerator.Emit(OpCodes.Call, typeof(GC).GetMethod(nameof(GC.WaitForPendingFinalizers), Type.EmptyTypes));
 				}
 #if GENERATE_DEBUG_LOGGING
@@ -855,7 +913,12 @@ namespace LbmLib.Language.Experimental
 
 		public override object DefaultValue => parameter.DefaultValue;
 
+#if MONO && NET35
+		// Apparently Mono .NET Framework 3.5's implementation of ParameterInfo.RawDefaultValue is non-virtual
+		// and simply delegates to DefaultValue (or DefaultValueImpl in even older versions?), so don't try overriding it in that case.
+#else
 		public override object RawDefaultValue => parameter.RawDefaultValue;
+#endif
 
 		public override ParameterAttributes Attributes => parameter.Attributes;
 
@@ -906,7 +969,12 @@ namespace LbmLib.Language.Experimental
 
 		public override object DefaultValue => DefaultValueImpl;
 
+#if MONO && NET35
+		// Apparently Mono .NET Framework 3.5's implementation of ParameterInfo.RawDefaultValue is non-virtual
+		// and simply delegates to DefaultValue (or DefaultValueImpl in even older versions?), so don't try overriding it in that case.
+#else
 		public override object RawDefaultValue => DefaultValueImpl;
+#endif
 
 		public override ParameterAttributes Attributes => AttrsImpl;
 
@@ -918,9 +986,9 @@ namespace LbmLib.Language.Experimental
 		public override IEnumerable<CustomAttributeData> CustomAttributes => Enumerable.Empty<CustomAttributeData>();
 #endif
 
-		public override object[] GetCustomAttributes(bool inherit) => new object[0];
+		public override object[] GetCustomAttributes(bool inherit) => ClosureMethod.EmptyObjectArray;
 
-		public override object[] GetCustomAttributes(Type attributeType, bool inherit) => new object[0];
+		public override object[] GetCustomAttributes(Type attributeType, bool inherit) => ClosureMethod.EmptyObjectArray;
 
 		public override Type[] GetOptionalCustomModifiers() => Type.EmptyTypes;
 
