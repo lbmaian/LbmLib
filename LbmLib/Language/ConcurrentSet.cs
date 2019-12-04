@@ -129,10 +129,12 @@ namespace LbmLib.Language
 		// There is no reliable way to replicate this behavior exactly with Dictionary<K, V>, so the next best option is done:
 		// The dictionary entries must be copied immediately within this method (rather than on demand during enumeration),
 		// or else InvalidOperationException is risked (due to the dictionary being potentially modified during enumeration).
+		// The returned enumerator itself is also thread-safe.
 		public IEnumerator<KeyValuePair<K, V>> GetEnumerator()
 		{
 			lock (dictionary.SyncRoot)
-				return new List<KeyValuePair<K, V>>(dictionary).GetEnumerator();
+				return new SynchronizedEnumerator<KeyValuePair<K, V>>(dictionary.SyncRoot,
+					new List<KeyValuePair<K, V>>(dictionary).GetEnumerator());
 		}
 
 		public V GetOrAdd(K key, Func<K, V> valueFactory)
@@ -236,10 +238,6 @@ namespace LbmLib.Language
 		public override int GetHashCode() => -1095569795 + dictionary.GetHashCode();
 
 		public override string ToString() => dictionary.ToString();
-
-		public static bool operator ==(ConcurrentDictionary<K, V> left, ConcurrentDictionary<K, V> right) => Equals(left, right);
-
-		public static bool operator !=(ConcurrentDictionary<K, V> left, ConcurrentDictionary<K, V> right) => !Equals(left, right);
 	}
 
 	// In .NET Framework 3.5, ConcurrentSet<T> is simply a wrapper around SynchronizedSet<T>-wrapped HashSet<T>.
@@ -320,10 +318,6 @@ namespace LbmLib.Language
 		void ICollection.CopyTo(Array array, int index) => CopyTo((T[])array, index);
 
 		IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-		public static bool operator ==(ConcurrentSet<T> left, ConcurrentSet<T> right) => Equals(left, right);
-
-		public static bool operator !=(ConcurrentSet<T> left, ConcurrentSet<T> right) => !Equals(left, right);
 	}
 #else
 	// A concurrent ISet<T> implementation based off ConcurrentDictionary<T, bool>.
@@ -569,10 +563,6 @@ namespace LbmLib.Language
 		public override int GetHashCode() => -1095569795 + dictionary.GetHashCode();
 
 		public override string ToString() => dictionary.ToString();
-
-		public static bool operator ==(ConcurrentSet<T> left, ConcurrentSet<T> right) => Equals(left, right);
-
-		public static bool operator !=(ConcurrentSet<T> left, ConcurrentSet<T> right) => !Equals(left, right);
 	}
 #endif
 }

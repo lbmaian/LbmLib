@@ -88,12 +88,12 @@ namespace LbmLib.Language
 				set.ExceptWith(other);
 		}
 
+		// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
+		// but at least we can synchronize the GetEnumerator() call and the returned enumerator's relevant properties/methods.
 		public IEnumerator<T> GetEnumerator()
 		{
-			// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
-			// but at least we can synchronize the GetEnumerator() call.
 			lock (sync)
-				return set.GetEnumerator();
+				return new SynchronizedEnumerator<T>(sync, set.GetEnumerator());
 		}
 
 		public void IntersectWith(IEnumerable<T> other)
@@ -167,9 +167,5 @@ namespace LbmLib.Language
 		public override int GetHashCode() => -191684997 + set.GetHashCode();
 
 		public override string ToString() => set.ToString();
-
-		public static bool operator ==(SynchronizedSet<T> left, SynchronizedSet<T> right) => Equals(left, right);
-
-		public static bool operator !=(SynchronizedSet<T> left, SynchronizedSet<T> right) => !Equals(left, right);
 	}
 }

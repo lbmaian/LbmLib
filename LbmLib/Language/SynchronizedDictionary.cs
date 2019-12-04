@@ -6,7 +6,7 @@ using System.Linq;
 namespace LbmLib.Language
 {
 	// Synchronized wrapper over an IDictionary. Intended for .NET 3.5 Framework usage, since it lacks ConcurrentDictionary,
-	// which would have better performance over a naive synchronized-on-every-method class like this.
+	// which would have better performance over a naive synchronize-on-every-method class like this.
 	public class SynchronizedDictionary<K, V> : IDictionary<K, V>, IDictionary
 	{
 		readonly IDictionary<K, V> dictionary;
@@ -117,12 +117,12 @@ namespace LbmLib.Language
 				dictionary.CopyTo(array, arrayIndex);
 		}
 
+		// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
+		// but at least we can synchronize the GetEnumerator() call and the returned enumerator's relevant properties/methods.
 		public IEnumerator<KeyValuePair<K, V>> GetEnumerator()
 		{
-			// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
-			// but at least we can synchronize the GetEnumerator() call.
 			lock (sync)
-				return dictionary.GetEnumerator();
+				return new SynchronizedEnumerator<KeyValuePair<K, V>>(sync, dictionary.GetEnumerator());
 		}
 
 		public bool Remove(K key)
@@ -155,15 +155,17 @@ namespace LbmLib.Language
 
 		void IDictionary.Add(object key, object value) => Add((K)key, (V)value);
 
-		struct DictionaryEnumerator : IDictionaryEnumerator
+		struct WrapperDictionaryEnumerator : IDictionaryEnumerator
 		{
-			readonly IEnumerator<KeyValuePair<K, V>> enumerator;
-
+			readonly IDictionaryEnumerator enumerator;
+			readonly object sync;
 			DictionaryEntry entry;
 
-			internal DictionaryEnumerator(IEnumerator<KeyValuePair<K, V>> enumerator)
+			internal WrapperDictionaryEnumerator(object sync, IDictionaryEnumerator enumerator)
 			{
 				this.enumerator = enumerator;
+				this.sync = sync;
+				entry = default;
 			}
 
 			public object Key => entry.Key;
@@ -176,28 +178,91 @@ namespace LbmLib.Language
 
 			public bool MoveNext()
 			{
-				if (enumerator.MoveNext())
+				// This localizes the synchronization of both enumerator.MoveNext() and enumerator.Current to a single method.
+				lock (sync)
 				{
-					var pair = enumerator.Current;
-					entry = new DictionaryEntry(pair.Key, pair.Value);
-					return true;
-				}
-				else
-				{
-					entry = default;
+					if (enumerator.MoveNext())
+					{
+						entry = enumerator.Entry;
+						return true;
+					}
 					return false;
 				}
 			}
 
-			void IEnumerator.Reset() => enumerator.Reset();
+			void IEnumerator.Reset()
+			{
+				lock (sync)
+				{
+					enumerator.Reset();
+					entry = default;
+				}
+			}
 		}
 
+		struct KeyValuePairDictionaryEnumerator : IDictionaryEnumerator, IDisposable
+		{
+			readonly IEnumerator<KeyValuePair<K, V>> enumerator;
+			readonly object sync;
+			DictionaryEntry entry;
+
+			internal KeyValuePairDictionaryEnumerator(object sync, IEnumerator<KeyValuePair<K, V>> enumerator)
+			{
+				this.enumerator = enumerator;
+				this.sync = sync;
+				entry = default;
+			}
+
+			public object Key => entry.Key;
+
+			public object Value => entry.Value;
+
+			public DictionaryEntry Entry => entry;
+
+			public object Current => entry;
+
+			public bool MoveNext()
+			{
+				// This localizes the synchronization of both enumerator.MoveNext() and enumerator.Current to a single method.
+				lock (sync)
+				{
+					if (enumerator.MoveNext())
+					{
+						var pair = enumerator.Current;
+						entry = new DictionaryEntry(pair.Key, pair.Value);
+						return true;
+					}
+					return false;
+				}
+			}
+
+			public void Dispose()
+			{
+				lock (sync)
+					enumerator.Dispose();
+			}
+
+			void IEnumerator.Reset()
+			{
+				lock (sync)
+				{
+					enumerator.Reset();
+					entry = default;
+				}
+			}
+		}
+
+		// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
+		// but at least we can synchronize the GetEnumerator() call and the returned enumerator's relevant properties/methods.
 		IDictionaryEnumerator IDictionary.GetEnumerator()
 		{
-			// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
-			// but at least we can synchronize the GetEnumerator() call.
 			lock (sync)
-				return dictionary is IDictionary idictionary ? idictionary.GetEnumerator() : new DictionaryEnumerator(dictionary.GetEnumerator());
+			{
+				if (dictionary is IDictionary idictionary)
+					return new WrapperDictionaryEnumerator(sync, idictionary.GetEnumerator());
+				else
+					return new KeyValuePairDictionaryEnumerator(sync, dictionary.GetEnumerator());
+			}
 		}
 
 		void IDictionary.Remove(object key) => Remove((K)key);
@@ -209,9 +274,5 @@ namespace LbmLib.Language
 		public override int GetHashCode() => -1095569795 + dictionary.GetHashCode();
 
 		public override string ToString() => dictionary.ToString();
-
-		public static bool operator ==(SynchronizedDictionary<K, V> left, SynchronizedDictionary<K, V> right) => Equals(left, right);
-
-		public static bool operator !=(SynchronizedDictionary<K, V> left, SynchronizedDictionary<K, V> right) => !Equals(left, right);
 	}
 }

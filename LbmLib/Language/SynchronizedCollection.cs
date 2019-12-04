@@ -4,6 +4,53 @@ using System.Collections.Generic;
 
 namespace LbmLib.Language
 {
+	public struct SynchronizedEnumerator<T> : IEnumerator<T>
+	{
+		readonly IEnumerator<T> enumerator;
+		readonly object sync;
+		T current;
+
+		public SynchronizedEnumerator(object sync, IEnumerator<T> enumerator)
+		{
+			this.enumerator = enumerator;
+			this.sync = sync;
+			current = default;
+		}
+
+		public T Current => current;
+
+		object IEnumerator.Current => current;
+
+		public bool MoveNext()
+		{
+			// This localizes the synchronization of both enumerator.MoveNext() and enumerator.Current to a single method.
+			lock (sync)
+			{
+				if (enumerator.MoveNext())
+				{
+					current = enumerator.Current;
+					return true;
+				}
+				return false;
+			}
+		}
+
+		public void Dispose()
+		{
+			lock (sync)
+				enumerator.Dispose();
+		}
+
+		void IEnumerator.Reset()
+		{
+			lock (sync)
+			{
+				enumerator.Reset();
+				current = default;
+			}
+		}
+	}
+
 	// Similar to System.Collection.Generic.SynchronizedCollection<T>, but as an ICollection<T> wrapper
 	// and without needing a dependency on System.ServiceModel.dll.
 	public class SynchronizedCollection<T> : ICollection<T>, ICollection
@@ -60,12 +107,12 @@ namespace LbmLib.Language
 				collection.CopyTo(array, arrayIndex);
 		}
 
+		// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
+		// but at least we can synchronize the GetEnumerator() call and the returned enumerator's relevant properties/methods.
 		public IEnumerator<T> GetEnumerator()
 		{
-			// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
-			// but at least we can synchronize the GetEnumerator() call.
 			lock (sync)
-				return collection.GetEnumerator();
+				return new SynchronizedEnumerator<T>(sync, collection.GetEnumerator());
 		}
 
 		public bool Remove(T item)
@@ -83,9 +130,5 @@ namespace LbmLib.Language
 		public override int GetHashCode() => -1997316039 + collection.GetHashCode();
 
 		public override string ToString() => collection.ToString();
-
-		public static bool operator ==(SynchronizedCollection<T> left, SynchronizedCollection<T> right) => Equals(left, right);
-
-		public static bool operator !=(SynchronizedCollection<T> left, SynchronizedCollection<T> right) => !Equals(left, right);
 	}
 }

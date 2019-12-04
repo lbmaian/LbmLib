@@ -4,6 +4,59 @@ using System.Collections.Generic;
 
 namespace LbmLib.Language
 {
+	public struct SynchronizedListEnumerator<T> : IListEnumerator<T>
+	{
+		readonly IListEnumerator<T> enumerator;
+		readonly object sync;
+		T current;
+		int currentIndex;
+
+		public SynchronizedListEnumerator(object sync, IListEnumerator<T> enumerator)
+		{
+			this.sync = sync;
+			this.enumerator = enumerator;
+			current = default;
+			currentIndex = -1;
+		}
+
+		public T Current => current;
+
+		public int CurrentIndex => currentIndex;
+
+		object IEnumerator.Current => current;
+
+		public bool MoveNext()
+		{
+			// This localizes the synchronization of both enumerator.MoveNext() and enumerator.Current to a single method.
+			lock (sync)
+			{
+				if (enumerator.MoveNext())
+				{
+					current = enumerator.Current;
+					currentIndex = enumerator.CurrentIndex;
+					return true;
+				}
+				return false;
+			}
+		}
+
+		public void Dispose()
+		{
+			lock (sync)
+				enumerator.Dispose();
+		}
+
+		void IEnumerator.Reset()
+		{
+			lock (sync)
+			{
+				enumerator.Reset();
+				current = default;
+				currentIndex = -1;
+			}
+		}
+	}
+
 	// Similar to System.Collection.Generic.SynchronizedCollection<T>, but as an IList<T> wrapper
 	// and without needing a dependency on System.ServiceModel.dll.
 	public class SynchronizedList<T> : IListEx<T>
@@ -94,20 +147,20 @@ namespace LbmLib.Language
 				list.CopyTo(index, array, arrayIndex, count);
 		}
 
+		// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
+		// but at least we can synchronize the GetEnumerator() call and the returned enumerator's relevant properties/methods.
 		public IEnumerator<T> GetEnumerator()
 		{
-			// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
-			// but at least we can synchronize the GetEnumerator() call.
 			lock (sync)
-				return list.GetEnumerator();
+				return new SynchronizedEnumerator<T>(sync, list.GetEnumerator());
 		}
 
+		// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
+		// but at least we can synchronize the GetListEnumerator() call and the returned enumerator's relevant properties/methods.
 		public IListEnumerator<T> GetListEnumerator()
 		{
-			// Note: Enumeration itself is inherently not synchronized unless the caller explicitly enumerates within a SyncRoot lock,
-			// but at least we can synchronize the GetListEnumerator() call.
 			lock (sync)
-				return list.GetListEnumerator();
+				return new SynchronizedListEnumerator<T>(sync, list.GetListEnumerator());
 		}
 
 		public List<T> GetRange(int index, int count)
@@ -181,9 +234,5 @@ namespace LbmLib.Language
 		public override int GetHashCode() => 276365737 + list.GetHashCode();
 
 		public override string ToString() => list.ToString();
-
-		public static bool operator ==(SynchronizedList<T> left, SynchronizedList<T> right) => Equals(left, right);
-
-		public static bool operator !=(SynchronizedList<T> left, SynchronizedList<T> right) => !Equals(left, right);
 	}
 }
