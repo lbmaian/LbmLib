@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace LbmLib.Language
 {
@@ -46,35 +47,84 @@ namespace LbmLib.Language
 	// More than two ILists together fluently into a recursive ChainedList structure, e.g. listA.ChainConcat(listB).ChainConcat(listC).
 	// It technically forms a binary non-self-balancing tree where each node represents an IList, a bit similar to an ImmutableList.
 	// Note: This is NOT thread-safe, even if both lists are thread-safe.
-	abstract class BaseChainedList<T, L> : IList<T>, IList where L : IList<T>
+	abstract class BaseChainedList<T, TList> : IList<T>, IList, IListWithReadOnlyRangeMethods<T>, IListWithListEnumerator<T> where TList : IList<T>
 	{
-		private protected readonly L left;
-		private protected readonly L right;
+		struct ChainedListEnumerator : IListEnumerator<T>
+		{
+			readonly IEnumerator<T> left;
+			readonly IEnumerator<T> right;
+			int index;
+			bool useLeft;
 
-		private protected BaseChainedList(L left, L right)
+			internal ChainedListEnumerator(IEnumerator<T> left, IEnumerator<T> right)
+			{
+				this.left = left;
+				this.right = right;
+				index = -1;
+				useLeft = true;
+			}
+
+			public T Current => useLeft ? left.Current : right.Current;
+
+			public int CurrentIndex => index;
+
+			object IEnumerator.Current => Current;
+
+			[MethodImpl(256)] // AggressiveInlining
+			public bool MoveNext()
+			{
+				index++;
+				if (useLeft)
+				{
+					if (left.MoveNext())
+						return true;
+					useLeft = false;
+				}
+				return right.MoveNext();
+			}
+
+			public void Dispose()
+			{
+				left.Dispose();
+				right.Dispose();
+			}
+
+			void IEnumerator.Reset()
+			{
+				left.Reset();
+				right.Reset();
+				index = -1;
+				useLeft = true;
+			}
+		}
+
+		protected readonly TList left;
+		protected readonly TList right;
+
+		protected BaseChainedList(TList left, TList right)
 		{
 			this.left = left;
 			this.right = right;
 		}
 
-		public abstract T this[int index] { get; set; }
-
-		private protected T InternalGet(int index)
+		public virtual T this[int index]
 		{
-			var leftCount = left.Count;
-			if (index < leftCount)
-				return left[index];
-			else
-				return right[index - leftCount];
-		}
-
-		private protected void InternalSet(int index, T value)
-		{
-			var leftCount = left.Count;
-			if (index < leftCount)
-				left[index] = value;
-			else
-				right[index - leftCount] = value;
+			get
+			{
+				var leftCount = left.Count;
+				if (index < leftCount)
+					return left[index];
+				else
+					return right[index - leftCount];
+			}
+			set
+			{
+				var leftCount = left.Count;
+				if (index < leftCount)
+					left[index] = value;
+				else
+					right[index - leftCount] = value;
+			}
 		}
 
 		object IList.this[int index]
@@ -83,11 +133,11 @@ namespace LbmLib.Language
 			set => this[index] = (T)value;
 		}
 
-		public int Count => left.Count + right.Count;
+		public virtual int Count => left.Count + right.Count;
 
 		public abstract bool IsReadOnly { get; }
 
-		private protected abstract bool IsFixedSize { get; }
+		protected abstract bool IsFixedSize { get; }
 
 		bool IList.IsFixedSize => IsFixedSize;
 
@@ -95,7 +145,7 @@ namespace LbmLib.Language
 
 		int ICollection.Count => Count;
 
-		// The left and right IRefLists are not managed by ChainedRefList itself, so there's no way to guarantee a locked object can synchronize both.
+		// The left and right IRefLists are not managed by BaseChainedList itself, so there's no way to guarantee a locked object can synchronize both.
 		object ICollection.SyncRoot => throw new NotSupportedException();
 
 		bool ICollection.IsSynchronized => false;
@@ -112,7 +162,31 @@ namespace LbmLib.Language
 			right.CopyTo(array, left.Count + arrayIndex);
 		}
 
-		public override bool Equals(object obj) => obj is BaseChainedList<T, L> chainedList && left.Equals(chainedList.left) && right.Equals(chainedList.right);
+		public void CopyTo(int index, T[] array, int arrayIndex, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+				{
+					left.CopyTo(index, array, arrayIndex, count);
+				}
+				else
+				{
+					var leftRangeCount = leftCount - index;
+					left.CopyTo(index, array, arrayIndex, leftRangeCount);
+					right.CopyTo(0, array, arrayIndex + leftRangeCount, endIndex - leftCount);
+				}
+			}
+			else
+			{
+				right.CopyTo(index - leftCount, array, arrayIndex, count);
+			}
+		}
+
+		public override bool Equals(object obj) =>
+			obj is BaseChainedList<T, TList> chainedList && left.Equals(chainedList.left) && right.Equals(chainedList.right);
 
 		public override int GetHashCode()
 		{
@@ -120,6 +194,32 @@ namespace LbmLib.Language
 			hashCode = hashCode * -1521134295 + left.GetHashCode();
 			hashCode = hashCode * -1521134295 + right.GetHashCode();
 			return hashCode;
+		}
+
+		public virtual IListEnumerator<T> GetListEnumerator() => new ChainedListEnumerator(left.GetEnumerator(), right.GetEnumerator());
+
+		public List<T> GetRange(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+				{
+					return left.GetRange(index, count);
+				}
+				else
+				{
+					var range = new List<T>(count);
+					range.AddRange(left.GetRange(index, leftCount - index));
+					range.AddRange(right.GetRange(0, endIndex - leftCount));
+					return range;
+				}
+			}
+			else
+			{
+				return right.GetRange(index - leftCount, count);
+			}
 		}
 
 		public int IndexOf(T item)
@@ -183,35 +283,41 @@ namespace LbmLib.Language
 		void IList.RemoveAt(int index) => RemoveAt(index);
 	}
 
-	abstract class AbstractChainedList<T> : BaseChainedList<T, IList<T>>
-	{
-		private protected AbstractChainedList(IList<T> left, IList<T> right) : base(left, right)
-		{
-		}
-	}
-
-	sealed class ChainedList<T> : AbstractChainedList<T>
+	sealed class ChainedList<T> : BaseChainedList<T, IList<T>>, IListEx<T>
 	{
 		internal ChainedList(IList<T> left, IList<T> right) : base(left, right)
 		{
 		}
 
-		public override T this[int index]
-		{
-			get => InternalGet(index);
-			set => InternalSet(index, value);
-		}
-
 		public override bool IsReadOnly => false;
 
-		private protected override bool IsFixedSize => false;
+		protected override bool IsFixedSize => false;
 
 		public override void Add(T item) => right.Add(item);
+
+		public void AddRange(IEnumerable<T> collection) => right.AddRange(collection);
 
 		public override void Clear()
 		{
 			left.Clear();
 			right.Clear();
+		}
+
+		public IListEx<T> GetRangeView(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+					return left.GetRangeView(index, count);
+				else if (index == 0 && count == leftCount + right.Count)
+					return this;
+				else
+					return new ChainedList<T>(left.GetRangeView(index, leftCount - index), right.GetRangeView(0, endIndex - leftCount));
+			}
+			else
+				return right.GetRangeView(index - leftCount, count);
 		}
 
 		public override void Insert(int index, T item)
@@ -221,6 +327,15 @@ namespace LbmLib.Language
 				left.Insert(index, item);
 			else
 				right.Insert(index - leftCount, item);
+		}
+
+		public void InsertRange(int index, IEnumerable<T> collection)
+		{
+			var leftCount = left.Count;
+			if (index <= leftCount)
+				left.InsertRange(index, collection);
+			else
+				right.InsertRange(index - leftCount, collection);
 		}
 
 		public override bool Remove(T item)
@@ -239,54 +354,115 @@ namespace LbmLib.Language
 			else
 				right.RemoveAt(index - leftCount);
 		}
+
+		public void RemoveRange(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+				{
+					left.RemoveRange(index, count);
+				}
+				else
+				{
+					left.RemoveRange(index, leftCount - index);
+					right.RemoveRange(0, endIndex - leftCount);
+				}
+			}
+			else
+			{
+				right.RemoveRange(index - leftCount, count);
+			}
+		}
 	}
 
-	sealed class ChainedFixedSizeList<T> : AbstractChainedList<T>
+	sealed class ChainedFixedSizeList<T> : BaseChainedList<T, IList<T>>, IListEx<T>
 	{
 		internal ChainedFixedSizeList(IList<T> left, IList<T> right) : base(left, right)
 		{
 		}
 
-		public override T this[int index]
-		{
-			get => InternalGet(index);
-			set => InternalSet(index, value);
-		}
-
 		public override bool IsReadOnly => false;
 
-		private protected override bool IsFixedSize => true;
+		protected override bool IsFixedSize => true;
 
 		public override void Add(T item) => throw new NotSupportedException();
 
+		public void AddRange(IEnumerable<T> collection) => throw new NotSupportedException();
+
 		public override void Clear() => throw new NotSupportedException();
 
+		public IListEx<T> GetRangeView(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+					return left.GetRangeView(index, count);
+				else if (index == 0 && count == leftCount + right.Count)
+					return this;
+				else
+					return new ChainedFixedSizeList<T>(left.GetRangeView(index, leftCount - index), right.GetRangeView(0, endIndex - leftCount));
+			}
+			else
+				return right.GetRangeView(index - leftCount, count);
+		}
+
 		public override void Insert(int index, T item) => throw new NotSupportedException();
+
+		public void InsertRange(int index, IEnumerable<T> collection) => throw new NotSupportedException();
 
 		public override bool Remove(T item) => throw new NotSupportedException();
 
 		public override void RemoveAt(int index) => throw new NotSupportedException();
+
+		public void RemoveRange(int index, int count) => throw new NotSupportedException();
 	}
 
-	sealed class ChainedReadOnlyList<T> : AbstractChainedList<T>
+	sealed class ChainedReadOnlyList<T> : BaseChainedList<T, IList<T>>, IReadOnlyListEx<T>
+#if !NET35
+		, IReadOnlyList<T>
+#endif
 	{
 		internal ChainedReadOnlyList(IList<T> left, IList<T> right) : base(left, right)
 		{
 		}
 
+		// As this class isn't public, the indexer set accessor being public here doesn't matter.
+		// If this instance is cast as an IReadOnlyList<T>, then the indexer set accessor effectively isn't public.
 		public override T this[int index]
 		{
-			get => InternalGet(index);
+			get => base[index];
 			set => throw new NotSupportedException();
 		}
 
 		public override bool IsReadOnly => true;
 
-		private protected override bool IsFixedSize => true;
+		protected override bool IsFixedSize => true;
 
 		public override void Add(T item) => throw new NotSupportedException();
 
 		public override void Clear() => throw new NotSupportedException();
+
+		public IReadOnlyListEx<T> GetRangeView(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+					return left.AsReadOnly().GetRangeView(index, count);
+				else if (index == 0 && count == leftCount + right.Count)
+					return this;
+				else
+					return new ChainedReadOnlyList<T>(left.GetRangeView(index, leftCount - index), right.GetRangeView(0, endIndex - leftCount));
+			}
+			else
+				return right.AsReadOnly().GetRangeView(index - leftCount, count);
+		}
 
 		public override void Insert(int index, T item) => throw new NotSupportedException();
 

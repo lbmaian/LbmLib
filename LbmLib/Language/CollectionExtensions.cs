@@ -57,6 +57,7 @@ namespace LbmLib.Language
 		public static Dictionary<K, V> AsDictionary<K, V>(this IEnumerable<KeyValuePair<K, V>> pairs) =>
 			pairs as Dictionary<K, V> ?? pairs.ToDictionary(pair => pair.Key, pair => pair.Value);
 
+		// TODO: Although convenient, looks awkward - remove in favor of optional argument in IList.GetRange?
 		// Essentially IList.GetRange(list, 0, count) without needing to check whether index is out of bounds.
 		public static List<T> GetRangeFromStart<T>(this IList<T> list, int count)
 		{
@@ -75,6 +76,7 @@ namespace LbmLib.Language
 			return range;
 		}
 
+		// TODO: Although convenient, looks awkward - remove in favor of optional argument in IList.GetRange?
 		// Essentially IList.GetRange(list, index, list.Count - index) without needing to check whether count is out of bounds.
 		public static List<T> GetRangeToEnd<T>(this IList<T> list, int index)
 		{
@@ -209,6 +211,22 @@ namespace LbmLib.Language
 			return sb.ToString();
 		}
 
+		public static string Join(this IList list, int startIndex, int count, string delimiter = ", ")
+		{
+			if (count == 0)
+				return "";
+			var sb = new StringBuilder();
+			sb.Append(list[startIndex]?.ToString() ?? "null");
+			var endIndex = startIndex + count;
+			for (var index = startIndex + 1; index < endIndex; index++)
+			{
+				if (!(delimiter is null))
+					sb.Append(delimiter);
+				sb.Append(list[index]?.ToString() ?? "null");
+			}
+			return sb.ToString();
+		}
+
 		// Not named Reverse, since Enumerable.Reverse<T>(IEnumerable<T>) already exists, and string implements IEnumerable<char>.
 		// Also not a generic Unicode Reverse since it doesn't have special handling for Unicode surrogate pairs or Windows line breaks.
 		public static string SimpleReverse(this string str)
@@ -218,16 +236,19 @@ namespace LbmLib.Language
 			return new string(chars);
 		}
 
+		// TODO: Rename to FindSequenceIndex.
 		public static int FindIndex<T>(this IList<T> list, params Func<T, bool>[] sequenceMatches)
 		{
 			return list.FindIndex(0, list.Count, sequenceMatches);
 		}
 
+		// TODO: Rename to FindSequenceIndex.
 		public static int FindIndex<T>(this IList<T> list, int startIndex, params Func<T, bool>[] sequenceMatches)
 		{
 			return list.FindIndex(startIndex, list.Count - startIndex, sequenceMatches);
 		}
 
+		// TODO: Rename to FindSequenceIndex.
 		public static int FindIndex<T>(this IList<T> list, int startIndex, int count, params Func<T, bool>[] sequenceMatches)
 		{
 			if (sequenceMatches is null)
@@ -258,17 +279,20 @@ namespace LbmLib.Language
 			return index;
 		}
 
+		// TODO: Rename to FindSequenceLastIndex.
 		public static int FindLastIndex<T>(this IList<T> list, params Func<T, bool>[] sequenceMatches)
 		{
 			var listCount = list.Count;
 			return list.FindLastIndex(listCount - 1, listCount, sequenceMatches);
 		}
 
+		// TODO: Rename to FindSequenceLastIndex.
 		public static int FindLastIndex<T>(this IList<T> list, int startIndex, params Func<T, bool>[] sequenceMatches)
 		{
 			return list.FindLastIndex(startIndex, startIndex + 1, sequenceMatches);
 		}
 
+		// TODO: Rename to FindSequenceLastIndex.
 		public static int FindLastIndex<T>(this IList<T> list, int startIndex, int count, params Func<T, bool>[] sequenceMatches)
 		{
 			if (sequenceMatches is null)

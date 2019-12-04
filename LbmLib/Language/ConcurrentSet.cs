@@ -12,7 +12,7 @@ namespace LbmLib.Language
 {
 #if NET35
 	// In .NET Framework 3.5, ConcurrentDictionary<K, V> is simply a wrapper around SynchronizedDictionary<K, V>-wrapped Dictionary<K, V>
-	// that "implements the interface" of .NET Framework 4+ ConcurrentDictionary<K, V>.
+	// that "implements the interface" of .NET Framework 4.0+ ConcurrentDictionary<K, V> in a simple yet less performant manner.
 	public class ConcurrentDictionary<K, V> : IDictionary<K, V>, IDictionary
 	{
 		readonly SynchronizedDictionary<K, V> dictionary;
@@ -243,6 +243,7 @@ namespace LbmLib.Language
 	}
 
 	// In .NET Framework 3.5, ConcurrentSet<T> is simply a wrapper around SynchronizedSet<T>-wrapped HashSet<T>.
+	// This is simple but less performant than an implementation based around .NET Framework 4.0+ ConcurrentDictionary<T, bool>.
 	public class ConcurrentSet<T> : ICollection<T>, ICollection
 	{
 		readonly SynchronizedSet<T> set;
@@ -252,9 +253,20 @@ namespace LbmLib.Language
 			set = new SynchronizedSet<T>(new HashSet<T>());
 		}
 
+		public ConcurrentSet(IEqualityComparer<T> comparer)
+		{
+			set = new SynchronizedSet<T>(new HashSet<T>(comparer));
+		}
+
 		public ConcurrentSet(IEnumerable<T> collection)
 		{
 			set = new SynchronizedSet<T>(collection.AsHashSet());
+		}
+
+		public ConcurrentSet(IEnumerable<T> collection, IEqualityComparer<T> comparer)
+		{
+			var hashSet = collection is HashSet<T> actualSet && Equals(actualSet.Comparer, comparer) ? actualSet : new HashSet<T>(collection, comparer);
+			set = new SynchronizedSet<T>(hashSet);
 		}
 
 		public int Count => set.Count;

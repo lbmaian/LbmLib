@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace LbmLib.Language
@@ -73,7 +75,7 @@ namespace LbmLib.Language
 		public static IBaseRefList<T> ChainPrepend<T>(this T[] array, params T[] itemsToPrepend) => itemsToPrepend.ChainConcat(array);
 	}
 
-	abstract class AbstractChainedRefList<T> : BaseChainedList<T, IRefList<T>>, IRefList<T>
+	abstract class AbstractChainedRefList<T> : BaseChainedList<T, IRefList<T>>, IRefList<T>, IListEx<T>
 	{
 		struct ChainedRefListEnumerator : IRefListEnumerator<T>
 		{
@@ -100,6 +102,10 @@ namespace LbmLib.Language
 				get => leftEndIndex == -1 ? left.CurrentIndex : leftEndIndex + right.CurrentIndex;
 			}
 
+			T IEnumerator<T>.Current => Current;
+
+			object IEnumerator.Current => Current;
+
 			[MethodImpl(256)] // AggressiveInlining
 			public bool MoveNext()
 			{
@@ -111,17 +117,34 @@ namespace LbmLib.Language
 				}
 				return right.MoveNext();
 			}
+
+			public void Dispose()
+			{
+				left.Dispose();
+				right.Dispose();
+			}
+
+			void IEnumerator.Reset()
+			{
+				left.Reset();
+				right.Reset();
+				leftEndIndex = -1;
+			}
 		}
 
-		private protected AbstractChainedRefList(IRefList<T> left, IRefList<T> right) : base(left, right)
+		protected AbstractChainedRefList(IRefList<T> left, IRefList<T> right) : base(left, right)
 		{
 		}
+
+		public abstract void AddRange(IEnumerable<T> collection);
 
 		public IRefList<T> AsNonReadOnly() => this;
 
 		public IRefReadOnlyList<T> AsReadOnly() => new ChainedRefReadOnlyList<T>(left.AsReadOnly(), right.AsReadOnly());
 
 		public IRefListEnumerator<T> GetEnumerator() => new ChainedRefListEnumerator(left.GetEnumerator(), right.GetEnumerator());
+
+		public override IListEnumerator<T> GetListEnumerator() => GetEnumerator();
 
 		public ref T ItemRef(int index)
 		{
@@ -131,6 +154,14 @@ namespace LbmLib.Language
 			else
 				return ref right.ItemRef(index - leftCount);
 		}
+
+		public abstract IRefList<T> GetRangeView(int index, int count);
+
+		public abstract void InsertRange(int index, IEnumerable<T> collection);
+
+		public abstract void RemoveRange(int index, int count);
+
+		IListEx<T> IListWithRangeView<T, IListEx<T>>.GetRangeView(int index, int count) => (IListEx<T>)GetRangeView(index, count);
 	}
 
 	sealed class ChainedRefList<T> : AbstractChainedRefList<T>
@@ -139,22 +170,35 @@ namespace LbmLib.Language
 		{
 		}
 
-		public override T this[int index]
-		{
-			get => InternalGet(index);
-			set => InternalSet(index, value);
-		}
-
 		public override bool IsReadOnly => false;
 
-		private protected override bool IsFixedSize => false;
+		protected override bool IsFixedSize => false;
 
 		public override void Add(T item) => right.Add(item);
+
+		public override void AddRange(IEnumerable<T> collection) => right.AddRange(collection);
 
 		public override void Clear()
 		{
 			left.Clear();
 			right.Clear();
+		}
+
+		public override IRefList<T> GetRangeView(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+					return left.GetRangeView(index, count);
+				else if (index == 0 && count == leftCount + right.Count)
+					return this;
+				else
+					return new ChainedRefList<T>(left.GetRangeView(index, leftCount - index), right.GetRangeView(0, endIndex - leftCount));
+			}
+			else
+				return right.GetRangeView(index - leftCount, count);
 		}
 
 		public override void Insert(int index, T item)
@@ -164,6 +208,15 @@ namespace LbmLib.Language
 				left.Insert(index, item);
 			else
 				right.Insert(index - leftCount, item);
+		}
+
+		public override void InsertRange(int index, IEnumerable<T> collection)
+		{
+			var leftCount = left.Count;
+			if (index <= leftCount)
+				left.InsertRange(index, collection);
+			else
+				right.InsertRange(index - leftCount, collection);
 		}
 
 		public override bool Remove(T item)
@@ -182,6 +235,28 @@ namespace LbmLib.Language
 			else
 				right.RemoveAt(index - leftCount);
 		}
+
+		public override void RemoveRange(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+				{
+					left.RemoveRange(index, count);
+				}
+				else
+				{
+					left.RemoveRange(index, leftCount - index);
+					right.RemoveRange(0, endIndex - leftCount);
+				}
+			}
+			else
+			{
+				right.RemoveRange(index - leftCount, count);
+			}
+		}
 	}
 
 	sealed class ChainedFixedSizeRefList<T> : AbstractChainedRefList<T>
@@ -190,28 +265,45 @@ namespace LbmLib.Language
 		{
 		}
 
-		public override T this[int index]
-		{
-			get => InternalGet(index);
-			set => InternalSet(index, value);
-		}
-
 		public override bool IsReadOnly => false;
 
-		private protected override bool IsFixedSize => true;
+		protected override bool IsFixedSize => true;
 
 		public override void Add(T item) => throw new NotSupportedException();
 
+		public override void AddRange(IEnumerable<T> collection) => throw new NotSupportedException();
+
 		public override void Clear() => throw new NotSupportedException();
 
+		public override IRefList<T> GetRangeView(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+					return left.GetRangeView(index, count);
+				else if (index == 0 && count == leftCount + right.Count)
+					return this;
+				else
+					return new ChainedFixedSizeRefList<T>(left.GetRangeView(index, leftCount - index), right.GetRangeView(0, endIndex - leftCount));
+			}
+			else
+				return right.GetRangeView(index - leftCount, count);
+		}
+
 		public override void Insert(int index, T item) => throw new NotSupportedException();
+
+		public override void InsertRange(int index, IEnumerable<T> collection) => throw new NotSupportedException();
 
 		public override bool Remove(T item) => throw new NotSupportedException();
 
 		public override void RemoveAt(int index) => throw new NotSupportedException();
+
+		public override void RemoveRange(int index, int count) => throw new NotSupportedException();
 	}
 
-	sealed class ChainedRefReadOnlyList<T> : BaseChainedList<T, IRefReadOnlyList<T>>, IRefReadOnlyList<T>
+	sealed class ChainedRefReadOnlyList<T> : BaseChainedList<T, IRefReadOnlyList<T>>, IRefReadOnlyList<T>, IReadOnlyListEx<T>
 	{
 		struct ChainedRefReadOnlyListEnumerator : IRefReadOnlyListEnumerator<T>
 		{
@@ -238,6 +330,10 @@ namespace LbmLib.Language
 				get => leftEndIndex == -1 ? left.CurrentIndex : leftEndIndex + right.CurrentIndex;
 			}
 
+			T IEnumerator<T>.Current => Current;
+
+			object IEnumerator.Current => Current;
+
 			[MethodImpl(256)] // AggressiveInlining
 			public bool MoveNext()
 			{
@@ -249,6 +345,19 @@ namespace LbmLib.Language
 				}
 				return right.MoveNext();
 			}
+
+			public void Dispose()
+			{
+				left.Dispose();
+				right.Dispose();
+			}
+
+			void IEnumerator.Reset()
+			{
+				left.Reset();
+				right.Reset();
+				leftEndIndex = -1;
+			}
 		}
 
 		internal ChainedRefReadOnlyList(IRefReadOnlyList<T> left, IRefReadOnlyList<T> right) : base(left, right)
@@ -259,13 +368,13 @@ namespace LbmLib.Language
 		// If this instance is cast as an IRefReadOnlyList<T>, then the indexer set accessor effectively isn't public.
 		public override T this[int index]
 		{
-			get => InternalGet(index);
+			get => base[index];
 			set => throw new NotSupportedException();
 		}
 
 		public override bool IsReadOnly => true;
 
-		private protected override bool IsFixedSize => true;
+		protected override bool IsFixedSize => true;
 
 		public IRefList<T> AsNonReadOnly() => throw new NotSupportedException();
 
@@ -288,8 +397,27 @@ namespace LbmLib.Language
 
 		public override void Insert(int index, T item) => throw new NotSupportedException();
 
+		public IRefReadOnlyList<T> GetRangeView(int index, int count)
+		{
+			var leftCount = left.Count;
+			if (index < leftCount)
+			{
+				var endIndex = index + count;
+				if (endIndex <= leftCount)
+					return left.GetRangeView(index, count);
+				else if (index == 0 && count == leftCount + right.Count)
+					return this;
+				else
+					return new ChainedRefReadOnlyList<T>(left.GetRangeView(index, leftCount - index), right.GetRangeView(0, endIndex - leftCount));
+			}
+			else
+				return right.GetRangeView(index - leftCount, count);
+		}
+
 		public override bool Remove(T item) => throw new NotSupportedException();
 
 		public override void RemoveAt(int index) => throw new NotSupportedException();
+
+		IReadOnlyListEx<T> IListWithRangeView<T, IReadOnlyListEx<T>>.GetRangeView(int index, int count) => (IReadOnlyListEx<T>)GetRangeView(index, count);
 	}
 }

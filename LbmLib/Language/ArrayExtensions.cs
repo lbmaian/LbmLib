@@ -21,7 +21,9 @@ namespace LbmLib.Language
 			return itemsToPrepend.Append(array);
 		}
 
-		// Faster and more convenient that (T[])array.Clone().
+		// TODO: Rename to ToArray?
+		// Faster and more convenient than (T[])array.Clone().
+		// Note: This extension method cannot simply be named "Clone", because the array's own Clone method will always take precedence.
 		public static T[] Copy<T>(this T[] array)
 		{
 			var arrayLength = array.Length;
@@ -30,6 +32,7 @@ namespace LbmLib.Language
 			return copiedArray;
 		}
 
+		// TODO: Rename to Slice (ala C# 8 implicit Range support)?
 		// Array version of IList.GetRange(index, count).
 		public static T[] Copy<T>(this T[] array, int index, int count)
 		{
@@ -45,6 +48,7 @@ namespace LbmLib.Language
 			return range;
 		}
 
+		// TODO: Although convenient, looks awkward - remove in favor of optional argument in above Copy/Slice?
 		// Array version of IList.GetRangeFromStart(count).
 		public static T[] CopyFromStart<T>(this T[] array, int count)
 		{
@@ -58,6 +62,7 @@ namespace LbmLib.Language
 			return range;
 		}
 
+		// TODO: Although convenient, looks awkward - remove in favor of optional argument in above Copy/Slice?
 		// Array version of IList.GetRangeToEnd(index).
 		public static T[] CopyToEnd<T>(this T[] array, int index)
 		{

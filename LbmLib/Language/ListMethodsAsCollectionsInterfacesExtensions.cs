@@ -9,6 +9,8 @@ namespace LbmLib.Language
 	{
 		public static ReadOnlyCollection<T> AsReadOnly<T>(this IList<T> list)
 		{
+			if (list is ReadOnlyCollection<T> readOnlyCollection)
+				return readOnlyCollection;
 			return new ReadOnlyCollection<T>(list);
 		}
 
@@ -22,85 +24,8 @@ namespace LbmLib.Language
 			foreach (var item in enumerable)
 				action(item);
 		}
-
-		public static List<T> GetRange<T>(this IList<T> list, int index, int count)
-		{
-			if (list is List<T> actualList)
-				return actualList.GetRange(index, count);
-			if (index < 0)
-				throw new ArgumentOutOfRangeException($"index ({index}) cannot be < 0");
-			if (count < 0)
-				throw new ArgumentOutOfRangeException($"count ({count}) cannot be < 0");
-			var listCount = list.Count;
-			if (index > listCount - count)
-				throw new ArgumentOutOfRangeException($"index ({index}) + count ({count}) cannot be > list.Count ({listCount})");
-			var range = new List<T>(count);
-			var endIndexExcl = index + count;
-			while (index < endIndexExcl)
-			{
-				range.Add(list[index]);
-				index++;
-			}
-			return range;
-		}
-
-		public static void InsertRange<T>(this IList<T> list, int index, IEnumerable<T> collection)
-		{
-			if (list is List<T> actualList)
-			{
-				actualList.InsertRange(index, collection);
-				return;
-			}
-			if (collection is null)
-				throw new ArgumentNullException(nameof(collection));
-			if (index < 0)
-				throw new ArgumentOutOfRangeException($"index ({index}) cannot be < 0");
-			var listCount = list.Count;
-			if (index > listCount)
-				throw new ArgumentOutOfRangeException($"startIndex ({index}) cannot be > list.Count ({listCount})");
-			foreach (var item in collection)
-			{
-				list.Insert(index, item);
-				index++;
-			}
-		}
-
-		public static void AddRange<T>(this IList<T> list, IEnumerable<T> collection)
-		{
-			if (list is List<T> actualList)
-			{
-				actualList.AddRange(collection);
-				return;
-			}
-			if (collection is null)
-				throw new ArgumentNullException(nameof(collection));
-			foreach (var item in collection)
-			{
-				list.Add(item);
-			}
-		}
-
-		public static void RemoveRange<T>(this IList<T> list, int index, int count)
-		{
-			if (list is List<T> actualList)
-			{
-				actualList.RemoveRange(index, count);
-				return;
-			}
-			if (index < 0)
-				throw new ArgumentOutOfRangeException($"index ({index}) cannot be < 0");
-			if (count < 0)
-				throw new ArgumentOutOfRangeException($"count ({count}) cannot be < 0");
-			var listCount = list.Count;
-			if (index > listCount - count)
-				throw new ArgumentOutOfRangeException($"startIndex ({index}) + count ({count}) cannot be > list.Count ({listCount})");
-			var endIndex = index + count - 1;
-			while (endIndex >= index)
-			{
-				list.RemoveAt(endIndex);
-				endIndex--;
-			}
-		}
+		
+		// Note: GetRange, AddRange, InsertRange, and RemoveRange are implemented in ListRangeExtensions.
 
 		// If this method was called Reverse, it would typically have overload preference over Enumerable.Reverse, which wouldn't be preferable
 		// for IList implementations that don't even support in-place reverses, such as arrays.
@@ -203,39 +128,6 @@ namespace LbmLib.Language
 			list.CopyTo(array, 0);
 		}
 
-		public static void CopyTo<T>(this IList<T> list, int index, T[] array, int arrayIndex, int count)
-		{
-			if (list is List<T> actualList)
-			{
-				actualList.CopyTo(index, array, arrayIndex, count);
-				return;
-			}
-			if (list is Array actualArray)
-			{
-				Array.Copy(actualArray, index, array, arrayIndex, count);
-			}
-			// Following is based off Mono .NET Framework implementation, since MS .NET Framework one delegates most error checking to an extern Array.Copy.
-			var listCount = list.Count;
-			var arrayCount = array.Length;
-			if (index < 0)
-				throw new ArgumentOutOfRangeException($"index ({index}) cannot be < 0");
-			if (arrayIndex < 0)
-				throw new ArgumentOutOfRangeException($"arrayIndex ({arrayIndex}) cannot be < 0");
-			if (count < 0)
-				throw new ArgumentOutOfRangeException($"count ({count}) cannot be < 0");
-			if (listCount - index < count)
-				throw new ArgumentOutOfRangeException($"index ({index}) + count ({count}) cannot be > list.Count ({listCount})");
-			if (arrayCount - arrayIndex < count)
-				throw new ArgumentOutOfRangeException($"arrayIndex ({arrayIndex}) + count ({count}) cannot be > array.Length ({arrayCount})");
-			var endIndexExcl = index + count;
-			while (index < endIndexExcl)
-			{
-				array[arrayIndex] = list[index];
-				index++;
-				arrayIndex++;
-			}
-		}
-
 		public static T[] ToArray<T>(this IList<T> list)
 		{
 			if (list is List<T> actualList)
@@ -288,12 +180,15 @@ namespace LbmLib.Language
 			return x => equalityComparer.Equals(x, item);
 		}
 
-		public static int IndexOf<T>(this IList<T> list, T item)
-		{
-			if (list is List<T> actualList)
-				return actualList.IndexOf(item);
-			return FindIndexInternal(list, 0, list.Count, EqualsPredicate(item));
-		}
+		// Note: Although IList<T>.Contains(T item) already exists, this ensures this Contains overload always remains available,
+		// even if an IList<T> implementation hides it via explicit interface implementation (such as arrays).
+		// The following may look like it would result in infinite recursion, but list.Contains(item) actually calls the IList's own Contains method!
+		public static bool Contains<T>(this IList<T> list, T item) => list.Contains(item);
+
+		// Note: Although IList<T>.IndexOf(T item) already exists, this ensures this IndexOf overload always remains available,
+		// even if an IList<T> implementation hides it via explicit interface implementation (such as arrays).
+		// The following may look like it would result in infinite recursion, but list.IndexOf(item) actually calls the IList's own IndexOf method!
+		public static int IndexOf<T>(this IList<T> list, T item) => list.IndexOf(item);
 
 		public static int IndexOf<T>(this IList<T> list, T item, int index)
 		{

@@ -189,7 +189,7 @@ namespace LbmLib.Language
 				}
 			}
 
-			public void Reset() => enumerator.Reset();
+			void IEnumerator.Reset() => enumerator.Reset();
 		}
 
 		IDictionaryEnumerator IDictionary.GetEnumerator()
