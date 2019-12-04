@@ -74,7 +74,19 @@ namespace LbmLib.Language
 		static string AssemblyProductValue(this Assembly assembly) =>
 			((AssemblyProductAttribute)assembly.GetCustomAttributes(typeof(AssemblyProductAttribute), false).FirstOrDefault())?.Product ?? "";
 
+		// Note: Order of these static fields matters for initialization.
+		static readonly DynamicDispatchEntry BaseObjectToStringDynamicDispatchEntry = InitializeBaseObjectToStringDynamicDispatchEntry();
+		static readonly ConcurrentSet<MethodInfo> ToDebugStringMethods =
+			new ConcurrentSet<MethodInfo>(new[] { BaseObjectToStringDynamicDispatchEntry.Method });
 		static readonly IDictionary<Type, DynamicDispatchEntry> ToDebugStringDynamicDispatches = InitializeToDebugStringDynamicDispatches();
+
+		static DynamicDispatchEntry InitializeBaseObjectToStringDynamicDispatchEntry()
+		{
+			var type = typeof(object);
+			var method = type.GetMethod(nameof(object.ToString));
+			var @delegate = (Func<object, string>)Delegate.CreateDelegate(typeof(Func<object, string>), typeof(object).GetMethod(nameof(object.ToString)));
+			return new DynamicDispatchEntry(type, method, @delegate);
+		}
 
 		static IDictionary<Type, DynamicDispatchEntry> InitializeToDebugStringDynamicDispatches()
 		{
@@ -120,11 +132,12 @@ namespace LbmLib.Language
 									//Logging.Log($"Init {targetType} dispatch: {dispatch}");
 									toDebugStringDynamicDispatches[targetType] = dispatch;
 								}
+								ToDebugStringMethods.Add(method);
 							}
 						}
 					}
 				}
-				foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public))
+				foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly))
 				{
 					if (method.Name is "ToDebugString" && method.GetParameters().Length == 0)
 					{
@@ -134,22 +147,13 @@ namespace LbmLib.Language
 						var dispatch = new DynamicDispatchEntry(type, method, @delegate);
 						//Logging.Log($"Init {type} dispatch: {dispatch}");
 						toDebugStringDynamicDispatches[type] = dispatch;
+						ToDebugStringMethods.Add(method);
 					}
 				}
 			}
 		}
 
 		static bool IsStaticClass(Type type) => type.IsClass && type.IsAbstract && type.IsSealed;
-
-		static readonly DynamicDispatchEntry BaseObjectToStringDynamicDispatchEntry = InitializeBaseObjectToStringDynamicDispatchEntry();
-
-		static DynamicDispatchEntry InitializeBaseObjectToStringDynamicDispatchEntry()
-		{
-			var type = typeof(object);
-			var method = type.GetMethod(nameof(object.ToString));
-			var @delegate = (Func<object, string>)Delegate.CreateDelegate(typeof(Func<object, string>), typeof(object).GetMethod(nameof(object.ToString)));
-			return new DynamicDispatchEntry(type, method, @delegate);
-		}
 
 		public static string ToDebugString(this object obj)
 		{
@@ -564,7 +568,7 @@ namespace LbmLib.Language
 
 		public static string ToDebugString(this GCHandle gcHandle)
 		{
-			return "GCHandle{" + (!gcHandle.IsAllocated ? "null" : gcHandle.Target.ToDebugString()) + "} @" + gcHandle.GetHashCode();
+			return "GCHandle{" + (!gcHandle.IsAllocated ? "unallocated" : gcHandle.Target.ToDebugString()) + "} @" + gcHandle.GetHashCode();
 		}
 	}
 }

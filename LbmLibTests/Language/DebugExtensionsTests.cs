@@ -122,6 +122,13 @@ namespace LbmLib.Language.Tests
 			Assert.AreEqual("MyTestH", obj.ToDebugString());
 		}
 
+		[Test]
+		public void ToDebugStringTestI()
+		{
+			object obj = new TestI();
+			Assert.AreEqual("MyTestH", obj.ToDebugString());
+		}
+
 		public interface ITestA
 		{
 		}
@@ -153,6 +160,10 @@ namespace LbmLib.Language.Tests
 		public class TestH : ITestA, ITestB
 		{
 			public string ToDebugString() => "MyTestH";
+		}
+
+		public class TestI : TestH
+		{
 		}
 
 		[Test]

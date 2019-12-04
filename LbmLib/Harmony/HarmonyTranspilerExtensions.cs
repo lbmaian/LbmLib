@@ -547,8 +547,10 @@ namespace LbmLib.Harmony
 						if (finalReturnIndex != -1)
 						{
 							var finalReturnInstruction = instructions[finalReturnIndex];
+							var finalReturnInstructionLabels = new HashSet<Label>(finalReturnInstruction.labels);
 							var leaveIndex = instructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex,
-								instruction => instruction.opcode.EqualsIgnoreForm(OpCodes.Leave) && finalReturnInstruction.labels.Any(label => instruction.labels.Contains(label)));
+								instruction => instruction.opcode.EqualsIgnoreForm(OpCodes.Leave) &&
+									finalReturnInstructionLabels.Overlaps(instruction.labels));
 							if (leaveIndex != -1)
 							{
 								finalLabel = (Label)instructions[leaveIndex].operand;
@@ -589,10 +591,11 @@ namespace LbmLib.Harmony
 						{
 							var finalReturnValueStoreInstruction = instructions[finalReturnIndex];
 							var finalReturnInstruction = instructions[finalReturnIndex + 1];
+							var finalReturnInstructionLabels = new HashSet<Label>(finalReturnInstruction.labels);
 							var leaveIndex = instructions.FindIndex(searchIndex, finallyInsertIndex - tryStartIndex,
 								instruction => instruction.opcode == OpCodes.Stloc_S && instruction.operand == finalReturnValueStoreInstruction.operand,
 								instruction => instruction.opcode.EqualsIgnoreForm(OpCodes.Leave) &&
-									finalReturnInstruction.labels.Any(label => instruction.labels.Contains(label)));
+									finalReturnInstructionLabels.Overlaps(instruction.labels));
 							if (leaveIndex != -1)
 							{
 								returnValueVar = (LocalBuilder)instructions[leaveIndex].operand;
@@ -683,7 +686,8 @@ namespace LbmLib.Harmony
 
 		public static Func<CodeInstruction, bool> HasLabel(this Func<CodeInstruction, bool> instructionPredicate, IEnumerable<Label> labels)
 		{
-			return instruction => instructionPredicate(instruction) && labels.Any(label => instruction.labels.Contains(label));
+			return instruction => instructionPredicate(instruction) &&
+				(labels is HashSet<Label> labelSet ? labelSet.Overlaps(labels) : labels.Intersect(instruction.labels).Any());
 		}
 
 
