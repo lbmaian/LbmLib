@@ -1,4 +1,5 @@
-﻿using System;
+﻿/*
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,6 +9,7 @@ using Harmony;
 using Harmony.ILCopying;
 using LbmLib.Language;
 
+// TODO: This is a bad idea - do NOT use. Better to use an updated version of Harmony and take advantage of self-patching.
 namespace LbmLib.Harmony
 {
 	public static class HarmonyExtensions
@@ -132,3 +134,4 @@ namespace LbmLib.Harmony
 		}
 	}
 }
+*/
