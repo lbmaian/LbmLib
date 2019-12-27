@@ -1,8 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ProjectGuid>{5EB39975-FF2B-4306-A737-7FD09401FFC0}</ProjectGuid>
     <TargetFrameworks>net35;net45;net472</TargetFrameworks>
-    <LangVersion>7.3</LangVersion>
+    <LangVersion>8.0</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyTitle>LbmLib</AssemblyTitle>
     <Product>LbmLib</Product>
     <Authors>lbmaian</Authors>
@@ -23,6 +24,6 @@
     <DefineConstants>MONO</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Lib.Harmony" Version="1.2.0.1" ExcludeAssets="runtime" />
+    <PackageReference Include="Lib.Harmony" Version="1.2.0.1" />
   </ItemGroup>
 </Project>

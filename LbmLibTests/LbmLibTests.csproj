@@ -1,8 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ProjectGuid>{4754311A-F81E-47C6-8CC6-7767F4C32E92}</ProjectGuid>
     <TargetFrameworks>net35;net45;net472</TargetFrameworks>
-    <LangVersion>7.3</LangVersion>
+    <LangVersion>8.0</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyTitle>LbmLibTests</AssemblyTitle>
     <Product>LbmLibTests</Product>
     <Authors>lbmaian</Authors>
