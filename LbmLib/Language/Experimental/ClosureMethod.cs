@@ -659,13 +659,13 @@ namespace LbmLib.Language.Experimental
 				// Emit the code that loads the fixed arguments from ClosureMethod.FixedArgumentsRegistry into a local variable.
 				fixedArgumentsVar = ilGenerator.DeclareLocal(typeof(IRefList<object>));
 				ilGenerator.Emit(OpCodes.Ldsfld, FixedArgumentsRegistryField);
-				ilGenerator.EmitLdcI4(registryKey);
+				ilGenerator.EmitLdcI(registryKey);
 				ilGenerator.Emit(OpCodes.Call, ListOfIRefListOfObjectItemGetMethod);
 				ilGenerator.Emit(OpCodes.Dup);
 				var foundClosureLabel = ilGenerator.DefineLabel();
 				ilGenerator.Emit(OpCodes.Brtrue_S, foundClosureLabel);
 				ilGenerator.Emit(OpCodes.Ldstr, "Unexpectedly did not find closure object for registryKey={0} inside method=\"{1}\"");
-				ilGenerator.EmitLdcI4(registryKey);
+				ilGenerator.EmitLdcI(registryKey);
 				ilGenerator.Emit(OpCodes.Box, typeof(int));
 				ilGenerator.Emit(OpCodes.Call, GetCurrentMethodMethod);
 				ilGenerator.Emit(OpCodes.Call, MethodBaseToDebugStringMethod);
@@ -704,7 +704,7 @@ namespace LbmLib.Language.Experimental
 				{
 					// ... or is the first element of the closure fixed arguments.
 					ilGenerator.EmitLdloc(fixedArgumentsVar);
-					ilGenerator.EmitLdcI4(0);
+					ilGenerator.EmitLdcI(0);
 					ilGenerator.Emit(OpCodes.Callvirt, IRefListOfObjectItemGetMethod);
 					if (useCallOpcode)
 					{
@@ -740,7 +740,7 @@ namespace LbmLib.Language.Experimental
 				{
 					// Need the closure at this point to obtain the fixed arguments.
 					ilGenerator.EmitLdloc(fixedArgumentsVar);
-					ilGenerator.EmitLdcI4(index);
+					ilGenerator.EmitLdcI(index);
 					if (fixedArgumentIsByRef)
 					{
 						fixedArgumentType = fixedArgumentType.GetElementType();
