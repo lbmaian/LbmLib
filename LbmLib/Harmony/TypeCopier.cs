@@ -1,5 +1,11 @@
-﻿using System;
+﻿#if DEBUG
+#define TRACE_LOGGING
+#define DEBUG_LOGGING
+#endif
+
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -9,7 +15,7 @@ using Harmony.ILCopying;
 
 namespace LbmLib.Harmony
 {
-	public class TypeCopier
+	public partial class TypeCopier
 	{
 		abstract class Entry
 		{
@@ -20,7 +26,7 @@ namespace LbmLib.Harmony
 			{
 				Member = member;
 				Builder = builder;
-				Debug("new " + this);
+				Trace("new " + this);
 			}
 
 			public override string ToString() => $"{GetType().Name}(member: {MemberToString(Member)}, builder: {Builder.GetType()})";
@@ -138,6 +144,9 @@ namespace LbmLib.Harmony
 			return this;
 		}
 
+		// Note: The assembly (partial) copy, if saved, is not guaranteed to be portable.
+		// It is designed to be used in the same process.
+		// The assembly saving functionality is meant for debugging purposes.
 		public AssemblyBuilder CreateAssembly(string saveDirectory = null)
 		{
 			if (originalTypes.Count == 0)
@@ -181,7 +190,7 @@ namespace LbmLib.Harmony
 			var iterationCount = 0;
 			while (prevUnfinalizedCount > 0)
 			{
-				Debug($"Finalize iteration {iterationCount}: {prevUnfinalizedCount} remaining entries");
+				Trace($"Finalize iteration {iterationCount}: {prevUnfinalizedCount} remaining entries");
 				var unfinalizedMembers = new HashSet<MemberInfo>(unfinalizedEntries.Select(entry => entry.Member));
 				unfinalizedEntries = unfinalizedEntries.Where(entry => !FinalizeMember(entry, unfinalizedMembers)).ToList();
 				var unfinishedCount = unfinalizedEntries.Count;
@@ -196,7 +205,7 @@ namespace LbmLib.Harmony
 			threadLocalMemberCache = null;
 			threadLocalOriginalTypes = null;
 
-			Debug("Dynamic assembly types:\n\t" + assemblyBuilder.GetTypes().Join(delimiter: "\n\t"));
+			Trace("Dynamic assembly types:\n\t" + assemblyBuilder.GetTypes().Join(delimiter: "\n\t"));
 			if (!(saveDirectory is null))
 			{
 				assemblyBuilder.Save(saveFileName);
@@ -209,7 +218,7 @@ namespace LbmLib.Harmony
 
 		void PrepareTypeBuilders(Type originalType, ModuleBuilder moduleBuilder, Dictionary<Type, TypeBuilder> declaringTypeBuildersOfOriginalTypes)
 		{
-			Debug($"PrepareTypeBuilders({originalType}, moduleBuilder: {moduleBuilder}, declaringTypesOfOriginalTypes: ...)");
+			Trace($"PrepareTypeBuilders({originalType}, moduleBuilder: {moduleBuilder}, declaringTypesOfOriginalTypes: ...)");
 			// If original type is a nested type, define declaring (containing) types. Note that these declaring types will be minimally defined,
 			// only containing their generic type parameters and the necessary members up to the original types.
 			var declaringTypeStack = new Stack<Type>();
@@ -239,7 +248,7 @@ namespace LbmLib.Harmony
 
 		void PrepareTypeBuilders(Type type, TypeBuilder declaringTypeBuilder)
 		{
-			Debug($"PrepareTypeBuilders({type}, declaringTypeBuilder: {declaringTypeBuilder}, declaringTypesOfOriginalTypes: ...)");
+			Trace($"PrepareTypeBuilders({type}, declaringTypeBuilder: {declaringTypeBuilder}, declaringTypesOfOriginalTypes: ...)");
 			var typeBuilder = declaringTypeBuilder.DefineNestedType(type.Name, type.Attributes, type.BaseType, type.GetInterfaces());
 			typeBuilders.Add(type, typeBuilder);
 			foreach (var nestedType in type.GetNestedTypes(allDeclared))
@@ -272,7 +281,7 @@ namespace LbmLib.Harmony
 				return null;
 			if (memberCache.TryGetValue(member, out var entry))
 				return entry.Builder;
-			Debug($"CopyMember({member.GetType()}{{{MemberToString(member)}}}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyMember({member.GetType()}{{{MemberToString(member)}}}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			switch (member)
 			{
 			case Type type:
@@ -306,7 +315,7 @@ namespace LbmLib.Harmony
 				if (memberCache.TryGetValue(type, out var entry))
 					return (Type)entry.Builder;
 			}
-			Debug($"CopyType({MemberToString(type)}, checkDeclaringType: {checkDeclaringType})");
+			Trace($"CopyType({MemberToString(type)}, checkDeclaringType: {checkDeclaringType})");
 			// It's possible for CopyType(member) to be called on an original type via a member from another original type before
 			// CreateAssembly calls CopyTypeDef on that original type. Since GetDeclaringTypeBuilder(originalType) would return null,
 			// and we know CopyTypeDef is guaranteed to be called on the original type, just return the already prepared type builder for it.
@@ -337,7 +346,7 @@ namespace LbmLib.Harmony
 				if (memberCache.TryGetValue(method, out var entry))
 					return (MethodInfo)entry.Builder;
 			}
-			Debug($"CopyMethod({MemberToString(method)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyMethod({MemberToString(method)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			if (declaringTypeBuilder is null)
 			{
 				declaringTypeBuilder = GetDeclaringTypeBuilder(method);
@@ -367,7 +376,7 @@ namespace LbmLib.Harmony
 				if (memberCache.TryGetValue(constructor, out var entry))
 					return (ConstructorInfo)entry.Builder;
 			}
-			Debug($"CopyConstructor({MemberToString(constructor)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyConstructor({MemberToString(constructor)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			if (declaringTypeBuilder is null)
 			{
 				declaringTypeBuilder = GetDeclaringTypeBuilder(constructor);
@@ -395,7 +404,7 @@ namespace LbmLib.Harmony
 				if (memberCache.TryGetValue(property, out var entry))
 					return (PropertyInfo)entry.Builder;
 			}
-			Debug($"CopyProperty({MemberToString(property)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyProperty({MemberToString(property)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			if (declaringTypeBuilder is null)
 			{
 				declaringTypeBuilder = GetDeclaringTypeBuilder(property);
@@ -416,7 +425,7 @@ namespace LbmLib.Harmony
 				if (memberCache.TryGetValue(@event, out var entry))
 					return entry.Builder;
 			}
-			Debug($"CopyEvent({MemberToString(@event)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyEvent({MemberToString(@event)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			if (declaringTypeBuilder is null)
 			{
 				declaringTypeBuilder = GetDeclaringTypeBuilder(@event);
@@ -436,7 +445,7 @@ namespace LbmLib.Harmony
 				if (memberCache.TryGetValue(field, out var entry))
 					return (FieldInfo)entry.Builder;
 			}
-			Debug($"CopyField({MemberToString(field)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyField({MemberToString(field)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			if (declaringTypeBuilder is null)
 			{
 				declaringTypeBuilder = GetDeclaringTypeBuilder(field);
@@ -453,7 +462,7 @@ namespace LbmLib.Harmony
 
 		Type CopyTypeNonDef(Type type)
 		{
-			Debug($"CopyTypeNonDef({MemberToString(type)})");
+			Trace($"CopyTypeNonDef({MemberToString(type)})");
 			var genericTypeDefBuilder = (TypeBuilder)CopyType(type.GetGenericTypeDefinition(), checkDeclaringType: false);
 			// Note: Nested types inherit all generic arguments from all declaring (containing) types,
 			// so there's no need to call CopyType(type.DeclaringType) to recursively ensure all generic arguments are copied.
@@ -465,7 +474,7 @@ namespace LbmLib.Harmony
 
 		TypeBuilder CopyTypeDef(Type type, TypeBuilder typeBuilder, bool isDeclaringTypeOfOriginalType)
 		{
-			Debug($"CopyTypeDef({MemberToString(type)}, typeBuilder: {typeBuilder}, isDeclaringTypeOfOriginalType: {isDeclaringTypeOfOriginalType})");
+			Trace($"CopyTypeDef({MemberToString(type)}, typeBuilder: {typeBuilder}, isDeclaringTypeOfOriginalType: {isDeclaringTypeOfOriginalType})");
 			var entry = new TypeEntry(type, typeBuilder);
 			if (!isDeclaringTypeOfOriginalType)
 				memberCache.Add(type, entry);
@@ -497,7 +506,7 @@ namespace LbmLib.Harmony
 		MethodInfo CopyMethodNonDef(MethodInfo method, TypeBuilder declaringTypeBuilder,
 			bool isMethodGenericNonDef, bool isDeclaringTypeNonDef)
 		{
-			Debug($"CopyMethodNonDef({MemberToString(method)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"}, " +
+			Trace($"CopyMethodNonDef({MemberToString(method)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)}, " +
 				$"isMethodGenericNonDef: {isMethodGenericNonDef}, isDeclaringTypeNonDef: {isDeclaringTypeNonDef})");
 			var declaringType = method.DeclaringType;
 			// Need to get the (generic) method definition on the (generic) type definition.
@@ -532,7 +541,7 @@ namespace LbmLib.Harmony
 
 		MethodBuilder CopyMethodDef(MethodInfo method, TypeBuilder declaringTypeBuilder)
 		{
-			Debug($"CopyMethodDef({MemberToString(method)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyMethodDef({MemberToString(method)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			var methodBuilder = declaringTypeBuilder.DefineMethod(method.Name, method.Attributes, method.CallingConvention);
 			var entry = new MethodEntry(method, methodBuilder);
 			memberCache.Add(method, entry);
@@ -568,7 +577,7 @@ namespace LbmLib.Harmony
 
 		ConstructorInfo CopyConstructorNonDef(ConstructorInfo constructor, TypeBuilder declaringTypeBuilder)
 		{
-			Debug($"CopyConstructorNonDef({MemberToString(constructor)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyConstructorNonDef({MemberToString(constructor)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			var declaringType = constructor.DeclaringType;
 			// Need to get the constructor definition on the (generic) type definition.
 			var constructorDef = (ConstructorInfo)MethodBase.GetMethodFromHandle(constructor.MethodHandle,
@@ -594,7 +603,7 @@ namespace LbmLib.Harmony
 
 		ConstructorBuilder CopyConstructorDef(ConstructorInfo constructor, TypeBuilder declaringTypeBuilder)
 		{
-			Debug($"CopyConstructorDef({MemberToString(constructor)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyConstructorDef({MemberToString(constructor)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			// There's no ConstructorBuilder.SetParameters, so we have to CopyType the parameters first.
 			var parameters = constructor.GetParameters();
 			var parameterTypeBuilders = parameters.Select(parameter => CopyType(parameter.ParameterType)).ToArray();
@@ -619,7 +628,7 @@ namespace LbmLib.Harmony
 
 		PropertyBuilder CopyPropertyDef(PropertyInfo property, TypeBuilder declaringTypeBuilder)
 		{
-			Debug($"CopyPropertyDef({MemberToString(property)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyPropertyDef({MemberToString(property)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			var propertyTypeBuilder = CopyType(property.PropertyType);
 			var parameterTypeBuilders = property.GetIndexParameters().Select(parameter => CopyType(parameter.ParameterType)).ToArray();
 			var propertyBuilder = declaringTypeBuilder.DefineProperty(property.Name, property.Attributes, property.PropertyType, parameterTypeBuilders);
@@ -638,7 +647,7 @@ namespace LbmLib.Harmony
 
 		EventBuilder CopyEventDef(EventInfo @event, TypeBuilder declaringTypeBuilder)
 		{
-			Debug($"CopyEventDef({MemberToString(@event)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyEventDef({MemberToString(@event)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			var eventBuilder = declaringTypeBuilder.DefineEvent(@event.Name, @event.Attributes, @event.EventHandlerType);
 			memberCache.Add(@event, new EventEntry(@event, eventBuilder));
 			var customAttributes = CopyCustomAttributes(CustomAttributeData.GetCustomAttributes(@event));
@@ -657,7 +666,7 @@ namespace LbmLib.Harmony
 
 		FieldInfo CopyFieldNonDef(FieldInfo field, TypeBuilder declaringTypeBuilder)
 		{
-			Debug($"CopyFieldNonDef({MemberToString(field)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyFieldNonDef({MemberToString(field)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			var declaringType = field.DeclaringType;
 			// Need to get the constructor definition on the (generic) type definition.
 			var fieldDef = declaringType.GetGenericTypeDefinition().GetField(field.Name, allDeclared);
@@ -672,7 +681,7 @@ namespace LbmLib.Harmony
 
 		FieldBuilder CopyFieldDef(FieldInfo field, TypeBuilder declaringTypeBuilder)
 		{
-			Debug($"CopyFieldDef({MemberToString(field)}, declaringTypeBuilder: {declaringTypeBuilder?.ToString() ?? "null"})");
+			Trace($"CopyFieldDef({MemberToString(field)}, declaringTypeBuilder: {SafeToString(declaringTypeBuilder)})");
 			var fieldTypeBuilder = CopyType(field.FieldType);
 			var fieldBuilder = declaringTypeBuilder.DefineField(field.Name, fieldTypeBuilder, field.Attributes);
 			memberCache.Add(field, new FieldEntry(field, fieldBuilder));
@@ -684,7 +693,7 @@ namespace LbmLib.Harmony
 
 		void CopyGenericTypeParameters(Type[] genericArgs, GenericTypeParameterBuilder[] genericParameterBuilders, bool isDeclaringTypeOfOriginalType)
 		{
-			Debug($"CopyGenericTypeParameters({genericArgs.Join()}, genericParameterBuilders: {genericParameterBuilders.Join()})");
+			Trace($"CopyGenericTypeParameters({genericArgs.Join()}, genericParameterBuilders: {genericParameterBuilders.Join()})");
 			for (var i = 0; i < genericArgs.Length; i++)
 			{
 				var genericArg = genericArgs[i];
@@ -711,7 +720,7 @@ namespace LbmLib.Harmony
 
 		IEnumerable<CustomAttributeBuilder> CopyCustomAttributes(IList<CustomAttributeData> customAttributes)
 		{
-			Debug($"CopyCustomAttributes({customAttributes.Join()})");
+			Trace($"CopyCustomAttributes({customAttributes.Join()})");
 			foreach (var customAttribute in customAttributes)
 			{
 				CopyType(customAttribute.Constructor.DeclaringType);
@@ -744,7 +753,7 @@ namespace LbmLib.Harmony
 
 		void CopyParameterMisc(ParameterInfo parameter, ParameterBuilder parameterBuilder)
 		{
-			Debug($"CopyParameterMisc({parameter}, parameterBuilder: {parameterBuilder})");
+			Trace($"CopyParameterMisc({parameter}, parameterBuilder: {parameterBuilder})");
 			// Note: CopyType(parameter.ParameterType) should already have been done by now.
 			if ((parameter.Attributes & ParameterAttributes.HasDefault) == ParameterAttributes.HasDefault)
 				parameterBuilder.SetConstant(parameter.DefaultValue);
@@ -758,17 +767,17 @@ namespace LbmLib.Harmony
 
 		MethodBodyReader ScanMethod(MethodBase methodBase, ILGenerator ilGenerator)
 		{
-			Debug($"ScanMethod({MemberToString(methodBase)}, ilGenerator: ...)");
+			Trace($"ScanMethod({MemberToString(methodBase)}, ilGenerator: ...)");
 			// Don't try to scan/copy extern methods or any other method that somehow has no method body.
 			if (methodBase.GetMethodBody() is null)
 				return null;
 			var methodReader = new MethodBodyReader(methodBase, ilGenerator);
 			var locals = (IList<LocalVariableInfo>)localsField.GetValue(methodReader);
-			Debug("Locals:" + (locals.Count == 0 ? " (none)" : "\n\t" + locals.Select((local, i) => $"{i:d2}: {local}").Join(delimiter: "\n\t")));
+			Trace("Locals:" + (locals.Count == 0 ? " (none)" : "\n\t" + locals.Select((local, i) => $"{i:d2}: {local}").Join(delimiter: "\n\t")));
 			methodReader.DeclareVariables(locals.Select(local => ilGenerator.DeclareLocal(CopyType(local.LocalType), local.IsPinned)).ToArray());
 			methodReader.ReadInstructions();
 			var instructions = (IList<ILInstruction>)ilInstructionsField.GetValue(methodReader);
-			Debug($"Instructions:\n\t" + instructions.Select((instruction, i) => $"{i:x4}: {instruction}").Join(delimiter: "\n\t"));
+			Trace($"Instructions:\n\t" + instructions.Select((instruction, i) => $"{i:x4}: {instruction}").Join(delimiter: "\n\t"));
 			foreach (var instruction in instructions)
 			{
 				if (instruction.operand is MemberInfo member)
@@ -781,7 +790,7 @@ namespace LbmLib.Harmony
 
 		bool FinalizeMember(Entry entry, HashSet<MemberInfo> unfinalizedMembers)
 		{
-			Debug($"FinalizeMember({entry}, unfinalizedMembers: ...)");
+			Trace($"FinalizeMember({entry}, unfinalizedMembers: ...)");
 			var isFinalized = false;
 			if (entry is TypeEntry typeEntry)
 			{
@@ -804,15 +813,15 @@ namespace LbmLib.Harmony
 			{
 				throw new InvalidOperationException($"Unexpected {entry.Member.MemberType} member: {entry.Member}");
 			}
-			Debug($"FinalizeMember({entry}, unfinalizedMembers: ...) => {isFinalized}");
+			Trace($"FinalizeMember({entry}, unfinalizedMembers: ...) => {isFinalized}");
 			return isFinalized;
 		}
 
-		// This is called during the finalize phase. Technically, method/constructor definitions could be finalized right after ScanMethod,
+		// This is called during the finalize phase. Technically, method/constructor definitions could be finalized during ScanMethod,
 		// but that can lead to convoluted stack (traces) during processing, and it's just cleaner to do it later during the finalize phase.
 		void FinalizeMethod(MethodBase methodBase, MethodBodyReader methodReader, ILGenerator ilGenerator)
 		{
-			Debug($"FinalizeMethod({MemberToString(methodBase)}, methodReader: ..., ilGenerator: ...)");
+			Trace($"FinalizeMethod({MemberToString(methodBase)}, methodReader: ..., ilGenerator: ...)");
 			var transpilers = new List<MethodInfo>() { memberTranslationTranspiler };
 			if (methodTranspilers.TryGetValue(methodBase, out var transpiler))
 				transpilers.Add(transpiler);
@@ -828,17 +837,21 @@ namespace LbmLib.Harmony
 
 		static readonly MethodInfo memberTranslationTranspiler = typeof(TypeCopier).GetMethod(nameof(MemberTranslationTranspiler), AccessTools.all);
 
-		static IEnumerable<CodeInstruction> MemberTranslationTranspiler(IEnumerable<CodeInstruction> instructions, MethodBase sourceMethod)
+		static IEnumerable<CodeInstruction> MemberTranslationTranspiler(IEnumerable<CodeInstruction> instructions, MethodBase sourceMethod,
+			ILGenerator ilGenerator)
 		{
+			var inaccessibleBypass = new InaccessibleBypass(sourceMethod, ilGenerator,
+				declaringTypeFilter: type => threadLocalMemberCache.ContainsKey(type));
 			foreach (var instruction in instructions)
 			{
 				if (instruction.operand is MemberInfo member)
 				{
+					var opcode = instruction.opcode;
 					if (threadLocalMemberCache.TryGetValue(member, out var memberEntry))
 					{
-						Debug($"MemberTranslationTranspiler: {instruction}\n\treplacing {MemberToString(member)}\n\twith " +
-							memberEntry.Builder.GetType());
-						yield return new CodeInstruction(instruction.opcode, memberEntry.Builder)
+						Debug($"MemberTranslationTranspiler(instructions: ..., sourceMethod: {MemberToString(sourceMethod)}, ilGenerator: ...): " +
+							$"{instruction}\n\treplacing {MemberToString(member)}\n\twith {memberEntry.Builder.GetType()}");
+						yield return new CodeInstruction(opcode, memberEntry.Builder)
 						{
 							labels = instruction.labels,
 							blocks = instruction.blocks,
@@ -846,137 +859,35 @@ namespace LbmLib.Harmony
 						continue;
 					}
 					// If the member is internal (access modifier) and wasn't found in the member cache, the dynamic assembly can't access it.
-					// ldtoken instructions are apparently exempt from this accessibility check.
-					// TODO: Try to use reflection within the method to access such members? Possible edge cases like ldftn/ldvirtftn.
-					if (instruction.opcode != OpCodes.Ldtoken && !IsAccessible(sourceMethod, member))
+					if (!inaccessibleBypass.IsAccessible(opcode, member))
 					{
-						//throw new MethodAccessException($"Attempt by method '{MemberToString(sourceMethod)}' to access " +
-						//	$"'{MemberToString(member)}' failed.");
-						Warning($"Method '{MemberToString(sourceMethod)}' cannot access '{MemberToString(member)}' yet still attempts access");
+						// Try to bypass this inaccessibility.
+						var newInstructions = inaccessibleBypass.ForOpCode(opcode, member);
+						if (newInstructions is null)
+						{
+							//throw new MethodAccessException($"Attempt by method '{MemberToString(sourceMethod)}' to access " +
+							//	$"'{MemberToString(member)}' failed.");
+							Warning($"{instruction}: Method '{MemberToString(sourceMethod)}' cannot access '{MemberToString(member)}' yet still attempts access");
+						}
+						else
+						{
+							foreach (var newInstruction in newInstructions)
+								yield return newInstruction;
+							continue;
+						}
 					}
 				}
 				yield return instruction;
 			}
 		}
 
-		static bool IsAccessible(MethodBase sourceMethod, MemberInfo targetMember)
-		{
-			Debug($"IsAccessible(sourceMethod: {MemberToString(sourceMethod)}, targetMember: {MemberToString(targetMember)})");
-			// If the source method is accessing a target member outside of the member cache (i.e. original types and their contents),
-			// it's one of the following possibilities:
-			// 1) The target member is public, and its declaring type is accessible, which means its declaring type:
-			// 1a) is public, and its declaring type is accessible (recursively); or
-			// 1b) is the same as or is a parent type of any of the source method's declaring types.
-			// 2) The target member is protected (protected, protected internal, or protected private), and its declaring type:
-			// 2a) is a parent type of the source method's declaring type; or
-			// 2b) is the same as or is a parent type of any of the declaring types of the source method's declaring type (a nested type).
-			// 3) The target member is internal (internal, protected internal, or protected private).
-			// 4) The target member is private, and its declaring type is the same as any of the declaring types of the source method's
-			//    declaring type (a nested type).
-			// Of all these possibilities, only case 1 and 3 are valid within the dynamic assembly, with the following change to 1b and 2b:
-			// The target member's declaring type is a parent type of any of the source method's declaring types **that are in the member cache**.
-			// Type comparisons and parent type checks should be agnostic to generics as needed.
-			// Also, "parent type" includes both classes and interfaces (due to default interface members).
-			if (targetMember is Type targetType)
-				return IsAccessible(sourceMethod, targetType);
-			if (targetMember is MethodBase targetMethodBase)
-				return IsAccessible(sourceMethod, targetMethodBase);
-			if (targetMember is FieldInfo targetField)
-				return IsAccessible(sourceMethod, targetField);
-			else
-				throw new InvalidOperationException($"Unexpected {targetMember.MemberType} member: {targetMember}");
-		}
-
-		static bool IsAccessible(MethodBase sourceMethod, Type targetType)
-		{
-			var access = targetType.Attributes & TypeAttributes.VisibilityMask;
-			Debug($"{targetType.MemberType} accessibility: {AccessibilityToString(access)}");
-			if (access == TypeAttributes.Public)
-				return true;
-			else if (access == TypeAttributes.NestedPublic)
-				return IsAccessible(sourceMethod, targetType.DeclaringType);
-			else if (access == TypeAttributes.NestedFamily || access == TypeAttributes.NestedFamANDAssem || access == TypeAttributes.NestedFamORAssem)
-				return IsTargetDeclaringTypeAncestorTypeOfSourceDeclaringTypes(sourceMethod, targetType);
-			else
-				return false;
-		}
-
-		static bool IsTargetDeclaringTypeAncestorTypeOfSourceDeclaringTypes(MethodBase sourceMethod, MemberInfo targetMember)
-		{
-			var targetDeclaringType = targetMember.DeclaringType;
-			var sourceDeclaringType = sourceMethod.DeclaringType;
-			while (!(sourceDeclaringType is null) && threadLocalMemberCache.ContainsKey(sourceDeclaringType))
-			{
-				if (IsAncestorTypeOf(targetDeclaringType, sourceDeclaringType))
-					return true;
-				sourceDeclaringType = sourceDeclaringType.DeclaringType;
-			}
-			return false;
-		}
-
-		static bool IsAccessible(MethodBase sourceMethod, MethodBase targetMethodBase)
-		{
-			var access = targetMethodBase.Attributes & MethodAttributes.MemberAccessMask;
-			Debug($"{targetMethodBase.MemberType} accessibility: {AccessibilityToString(access)}");
-			if (access == MethodAttributes.Public)
-				return IsAccessible(sourceMethod, targetMethodBase.DeclaringType);
-			else if (access == MethodAttributes.Family || access == MethodAttributes.FamANDAssem || access == MethodAttributes.FamORAssem)
-				return IsTargetDeclaringTypeAncestorTypeOfSourceDeclaringTypes(sourceMethod, targetMethodBase);
-			else
-				return false;
-		}
-
-		static bool IsAccessible(MethodBase sourceMethod, FieldInfo targetField)
-		{
-			var access = targetField.Attributes & FieldAttributes.FieldAccessMask;
-			Debug($"{targetField.MemberType} accessibility: {AccessibilityToString(access)}");
-			if (access == FieldAttributes.Public)
-				return IsAccessible(sourceMethod, targetField.DeclaringType);
-			else if (access == FieldAttributes.Family || access == FieldAttributes.FamANDAssem || access == FieldAttributes.FamORAssem)
-				return IsTargetDeclaringTypeAncestorTypeOfSourceDeclaringTypes(sourceMethod, targetField);
-			else
-				return false;
-		}
-
-		static bool IsAncestorTypeOf(Type parentType, Type type)
-		{
-			if (parentType.IsClass)
-				return IsAncestorClassOf(AsTypeDef(parentType), type);
-			else if (parentType.IsInterface)
-				return IsInterfaceOf(AsTypeDef(parentType), type);
-			else
-				return false;
-		}
-
-		static bool IsAncestorClassOf(Type ancestorClassDef, Type type)
-		{
-			if (type.BaseType is Type baseType)
-			{
-				if (ancestorClassDef == AsTypeDef(baseType) || IsAncestorClassOf(ancestorClassDef, baseType))
-					return true;
-			}
-			return false;
-		}
-
-		static bool IsInterfaceOf(Type interfaceDef, Type type)
-		{
-			// Type.GetInterfaces() gets all interfaces, including both directly implemented or indirectly inherited,
-			// so no need for recursion.
-			foreach (var @interface in type.GetInterfaces())
-			{
-				if (interfaceDef == AsTypeDef(@interface))
-					return true;
-			}
-			return false;
-		}
-
-		static Type AsTypeDef(Type type) => type.IsGenericType && !type.IsGenericTypeDefinition ? type.GetGenericTypeDefinition() : type;
-
-		static string MemberToString(MemberInfo member)
+		internal static string MemberToString(MemberInfo member)
 		{
 			var str = member.DeclaringType is Type declaringType ? MemberToString(declaringType) + "." + member.Name : member.Name;
 			if (member is Type type)
 			{
+				if (type.Namespace is string @namespace)
+					str = @namespace + "." + str;
 				if (type.IsGenericType)
 					str += "<" + type.GetGenericArguments().Join(delimiter: ",") + ">";
 			}
@@ -989,76 +900,12 @@ namespace LbmLib.Harmony
 			return str;
 		}
 
-		// Workaround for TypeAttributes being such a messed up enum.
-		static string AccessibilityToString(TypeAttributes attributes)
-		{
-			switch (attributes & TypeAttributes.VisibilityMask)
-			{
-			case TypeAttributes.NotPublic:
-				return "NotPublic";
-			case TypeAttributes.Public:
-				return "Public";
-			case TypeAttributes.NestedPublic:
-				return "NestedPublic";
-			case TypeAttributes.NestedPrivate:
-				return "NestedPrivate";
-			case TypeAttributes.NestedFamily:
-				return "NestedFamily";
-			case TypeAttributes.NestedAssembly:
-				return "NestedAssembly";
-			case TypeAttributes.NestedFamANDAssem:
-				return "NestedFamANDAssem";
-			case TypeAttributes.NestedFamORAssem:
-				return "NestedFamORAssem";
-			default:
-				return null;
-			}
-		}
+		static string SafeToString(object obj) => obj?.ToString() ?? "null";
 
-		// Workaround for MethodAttributes being such a messed up enum.
-		static string AccessibilityToString(MethodAttributes attributes)
-		{
-			switch (attributes & MethodAttributes.MemberAccessMask)
-			{
-			case MethodAttributes.Private:
-				return "Private";
-			case MethodAttributes.FamANDAssem:
-				return "FamANDAssem";
-			case MethodAttributes.Assembly:
-				return "Assembly";
-			case MethodAttributes.Family:
-				return "Family";
-			case MethodAttributes.FamORAssem:
-				return "FamORAssem";
-			case MethodAttributes.Public:
-				return "Public";
-			default:
-				return null;
-			}
-		}
+		[Conditional("TRACE_LOGGING")]
+		static void Trace(string str) => Language.Logging.Log(str);
 
-		// Workaround for FieldAttributes being such a messed up enum.
-		static string AccessibilityToString(FieldAttributes attributes)
-		{
-			switch (attributes & FieldAttributes.FieldAccessMask)
-			{
-			case FieldAttributes.Private:
-				return "Private";
-			case FieldAttributes.FamANDAssem:
-				return "FamANDAssem";
-			case FieldAttributes.Assembly:
-				return "Assembly";
-			case FieldAttributes.Family:
-				return "Family";
-			case FieldAttributes.FamORAssem:
-				return "FamORAssem";
-			case FieldAttributes.Public:
-				return "Public";
-			default:
-				return null;
-			}
-		}
-
+		[Conditional("DEBUG_LOGGING")]
 		static void Debug(string str) => Language.Logging.Log(str);
 
 		static void Warning(string str) => Language.Logging.Log("WARNING: " + str);
